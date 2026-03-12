@@ -14,6 +14,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 
 
@@ -379,7 +380,7 @@ BOT74_REPORT_URL = (
     "&standAlone=true"
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"  # ← diubah dari "FUL WHS FG"
- 
+
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
     driver.switch_to.default_content()
@@ -413,14 +414,14 @@ def fill_date_v74(driver, label, index):
         if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
     except Exception as e: print(f"  ⚠️  S2: {e}")
     print(f"  ❌  {label} GAGAL!"); return False
- 
+
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
         wg = driver.find_element(By.ID, "WarehouseGroup")
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
- 
+
         # ── STRATEGI 1: coba via <select> HTML biasa ────────────────────
         try:
             sel_el = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup select")
@@ -434,11 +435,11 @@ def select_warehouse_group_v74(driver, item_text):
                     print(f"  ✅  via <select>: '{opt.text}'"); return True
         except: pass
         # ────────────────────────────────────────────────────────────────
- 
+
         # ── STRATEGI 2: klik toggle, ketik search, klik item via DOM ───
         toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
         driver.execute_script("arguments[0].click();", toggle); time.sleep(2.5)
- 
+
         # Ketik di search box (jika ada)
         search_typed = False
         for css in ["#WarehouseGroup input[type='text']",
@@ -451,7 +452,7 @@ def select_warehouse_group_v74(driver, item_text):
                     inp.send_keys(item_text); time.sleep(1.5)
                     print(f"  → Search: '{item_text}'"); search_typed = True; break
             except: continue
- 
+
         # Klik item langsung via JavaScript DOM (tidak pakai koordinat)
         for attempt in range(4):
             clicked = driver.execute_script("""
@@ -484,7 +485,7 @@ def select_warehouse_group_v74(driver, item_text):
                 return null;
             """, item_text)
             print(f"    attempt {attempt+1}: clicked={clicked}")
- 
+
             if clicked:
                 time.sleep(1.5)
                 # Cek apakah dropdown sudah tertutup
@@ -511,7 +512,7 @@ def select_warehouse_group_v74(driver, item_text):
                         +'#WarehouseGroup ul');
                     if(dd) dd.scrollTop+= 150;""")
                 time.sleep(0.8)
- 
+
         # ── STRATEGI 3: debug — print semua item di listbox ─────────────
         all_items = driver.execute_script("""
             var res=[];
@@ -522,10 +523,10 @@ def select_warehouse_group_v74(driver, item_text):
                 if(t&&t.length<80&&t.length>1) res.push(t);
             }); return [...new Set(res)].slice(0,20);""")
         print(f"  ℹ️  Items tersedia: {all_items}")
- 
+
         print("  ⚠️  Warehouse Group: tidak bisa konfirmasi, lanjut ..."); return True
     except Exception as e: print(f"  ❌  {e}\n{traceback.format_exc()}"); return False
- 
+
 def validate_dates_v74(driver):
     driver.switch_to.default_content()
     result = driver.execute_script(r"""
@@ -538,7 +539,7 @@ def validate_dates_v74(driver):
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
     return so, eo
- 
+
 def run_cell2(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
@@ -565,7 +566,6 @@ def run_cell2(driver, gc):
             print("\n  ⚠️  Download gagal")
     except SystemExit as se: print(f"\n  🛑  {se}")
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
- 
 
 # =============================================================================
 # CELL 3 — Monitor SJ Detail CO → tab "CO"
