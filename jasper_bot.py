@@ -2,7 +2,7 @@
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  JasperBot — GitHub Actions                                             ║
 # ║  1 driver → 1 login → 4 tab (Cell 2/3/4/5)                             ║
-# ║  Rebuilt dari notebook jasper_lagi.ipynb (versi Colab yang berhasil)    ║
+# ║  + SCREENSHOT otomatis → Google Drive                                   ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
 import os, sys, time, glob, shutil, re, json, traceback
@@ -15,10 +15,12 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 
-
-
 import gspread
 from google.oauth2.service_account import Credentials
+# ─── TAMBAHAN untuk Drive API ───────────────────────────────────────────────
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+# ────────────────────────────────────────────────────────────────────────────
 import openpyxl, xlrd
 
 # =============================================================================
@@ -43,7 +45,13 @@ ERP_URL  = "https://erp.tangki.id/webui/index.zul"
 ERP_USER = "muhammad.prasetyo"
 ERP_PASS = "Adminhqacc12"
 
-for d in [DOWNLOAD_DIR, C5_DOWNLOAD_DIR, FOLDER_OUT]:
+# ─── SCREENSHOT CONFIG ──────────────────────────────────────────────────────
+SCREENSHOT_DIR         = "/tmp/jasper_screenshots/"   # folder lokal sementara
+# Nama folder di Google Drive tempat screenshot disimpan
+GDRIVE_SCREENSHOT_FOLDER_NAME = f"JasperBot_Screenshots_{TODAY_LABEL}"
+# ────────────────────────────────────────────────────────────────────────────
+
+for d in [DOWNLOAD_DIR, C5_DOWNLOAD_DIR, FOLDER_OUT, SCREENSHOT_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # =============================================================================
@@ -54,11 +62,98 @@ def init_gc():
     b64 = os.environ.get("GSHEET_CREDENTIALS_B64", "")
     if not b64:
         raise RuntimeError("GSHEET_CREDENTIALS_B64 tidak ditemukan di environment!")
+    creds_info = json.loads(base64.b64decode(b64).decode())
     creds = Credentials.from_service_account_info(
-        json.loads(base64.b64decode(b64).decode()),
-        scopes=["https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"])
-    return gspread.authorize(creds)
+        creds_info,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",          # scope drive sudah ada
+        ])
+    gc = gspread.authorize(creds)
+    return gc, creds_info   # kembalikan creds_info agar bisa buat Drive service
+
+# =============================================================================
+# ─── SCREENSHOT HELPERS ──────────────────────────────────────────────────────
+# =============================================================================
+
+def init_drive_service(creds_info):
+    """Buat Google Drive API service dari service account info dict."""
+    creds = Credentials.from_service_account_info(
+        creds_info,
+        scopes=["https://www.googleapis.com/auth/drive"])
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+
+def get_or_create_drive_folder(drive_service, folder_name, parent_id=None):
+    """
+    Cari folder bernama `folder_name` di Drive.
+    Jika tidak ada, buat folder baru.
+    Kembalikan folder_id.
+    """
+    query = (f"name='{folder_name}' "
+             f"and mimeType='application/vnd.google-apps.folder' "
+             f"and trashed=false")
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+
+    results = drive_service.files().list(
+        q=query, spaces="drive", fields="files(id, name)").execute()
+    files = results.get("files", [])
+
+    if files:
+        folder_id = files[0]["id"]
+        print(f"  📂  Folder Drive ditemukan: '{folder_name}' (id={folder_id})")
+        return folder_id
+
+    # Buat folder baru
+    meta = {
+        "name": folder_name,
+        "mimeType": "application/vnd.google-apps.folder",
+    }
+    if parent_id:
+        meta["parents"] = [parent_id]
+    folder = drive_service.files().create(body=meta, fields="id").execute()
+    folder_id = folder["id"]
+    print(f"  📂  Folder Drive dibuat: '{folder_name}' (id={folder_id})")
+    return folder_id
+
+
+def take_screenshot(driver, label, drive_service=None, folder_id=None):
+    """
+    Ambil screenshot, simpan lokal, lalu upload ke Google Drive jika tersedia.
+    Nama file: YYYYMMDD_HHMMSS_<label>.png
+    """
+    try:
+        ts       = datetime.now(WIB).strftime("%Y%m%d_%H%M%S")
+        safe_lbl = re.sub(r"[^\w\-]", "_", label)
+        filename = f"{ts}_{safe_lbl}.png"
+        filepath = os.path.join(SCREENSHOT_DIR, filename)
+
+        driver.save_screenshot(filepath)
+        size_kb = os.path.getsize(filepath) // 1024
+        print(f"  📸  Screenshot: {filename}  ({size_kb} KB)")
+
+        # Upload ke Drive jika service tersedia
+        if drive_service and folder_id:
+            _upload_screenshot_to_drive(drive_service, folder_id, filepath, filename)
+
+        return filepath
+    except Exception as e:
+        print(f"  ⚠️  Screenshot gagal [{label}]: {e}")
+        return None
+
+
+def _upload_screenshot_to_drive(drive_service, folder_id, filepath, filename):
+    """Upload file PNG ke folder Google Drive yang sudah dibuat."""
+    try:
+        file_meta = {"name": filename, "parents": [folder_id]}
+        media     = MediaFileUpload(filepath, mimetype="image/png", resumable=False)
+        uploaded  = drive_service.files().create(
+            body=file_meta, media_body=media, fields="id, webViewLink").execute()
+        link = uploaded.get("webViewLink", "")
+        print(f"  ✅  Drive upload OK → {link}")
+    except Exception as e:
+        print(f"  ⚠️  Drive upload gagal: {e}")
 
 # =============================================================================
 # DRIVER
@@ -82,13 +177,12 @@ def make_driver(download_dir=DOWNLOAD_DIR):
         "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
     })
     d = webdriver.Chrome(options=opts)
-    # Beri halaman waktu cukup untuk load (fix ReadTimeoutError)
     d.set_script_timeout(120)
-    d.implicitly_wait(0)           # jangan implicit wait, pakai explicit
+    d.implicitly_wait(0)
     return d
 
 # =============================================================================
-# HELPER FUNCTIONS  (identik dengan notebook)
+# HELPER FUNCTIONS
 # =============================================================================
 def clean_value(val):
     if val is None: return ''
@@ -147,27 +241,33 @@ def scan_downloads(search_dirs=None):
     now = time.time()
     return [f for f in found if now - os.path.getmtime(f) < 300]
 
-def do_login(driver):
+def do_login(driver, ss=None):
+    """Login ke Jasper. ss = dict {drive_service, folder_id} untuk screenshot."""
     print("  → Login ...")
     driver.get(f"{BASE_URL}/login.html")
     wait_ready(driver)
     driver.find_element(By.ID, "j_username").send_keys(USERNAME)
     try:
         p = driver.find_element(By.ID, "j_password_pseudo")
-        p.click()
-        time.sleep(0.5)
+        p.click(); time.sleep(0.5)
     except:
         p = driver.find_element(By.ID, "j_password")
     p.send_keys(PASSWORD)
     try:
         WebDriverWait(driver, 30).until(
             EC.element_to_be_clickable((By.ID, "submitButton"))).click()
-    except TimeoutException:
+    except:
         p.send_keys(Keys.RETURN)
     time.sleep(5)
+
+    # ── SCREENSHOT setelah login ─────────────────────────────────────────
+    if ss:
+        take_screenshot(driver, "01_login_success",
+                        ss["drive_service"], ss["folder_id"])
+    # ─────────────────────────────────────────────────────────────────────
     print("  ✅ Login OK")
 
-def click_apply_dialog(driver):
+def click_apply_dialog(driver, ss=None):
     print("\n  🔵 Klik Apply ...")
     btn = None
     for sel in [(By.ID, "apply"), (By.CSS_SELECTOR, "button#apply"),
@@ -184,6 +284,13 @@ def click_apply_dialog(driver):
         "return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};", btn)
     bx, by = br['x'], br['y']
     driver.execute_script("arguments[0].click();", btn); time.sleep(2)
+
+    # ── SCREENSHOT setelah Apply ─────────────────────────────────────────
+    if ss:
+        take_screenshot(driver, f"{ss.get('prefix','')}_after_apply",
+                        ss["drive_service"], ss["folder_id"])
+    # ─────────────────────────────────────────────────────────────────────
+
     if is_loading_visible(driver): print("  ✅ Apply S1!"); return True
     do_click(driver, btn, bx, by); time.sleep(2)
     if is_loading_visible(driver): print("  ✅ Apply S2!"); return True
@@ -191,7 +298,7 @@ def click_apply_dialog(driver):
     if is_loading_visible(driver): print("  ✅ Apply S3!"); return True
     print("  ⚠️ Loading tidak terdeteksi — lanjut ..."); return True
 
-def wait_loading(driver):
+def wait_loading(driver, ss=None, prefix=""):
     print("\n  ⏳ Tunggu loading muncul (max 60s) ...")
     appeared = False
     for i in range(60):
@@ -205,11 +312,17 @@ def wait_loading(driver):
     while True:
         time.sleep(5); tick += 1
         if not is_loading_visible(driver):
-            print(f"  ✅ Loading selesai ~{tick*5}s"); break
+            print(f"  ✅ Loading selesai ~{tick*5}s")
+            # ── SCREENSHOT setelah loading selesai ──────────────────────
+            if ss:
+                take_screenshot(driver, f"{prefix}_report_loaded",
+                                ss["drive_service"], ss["folder_id"])
+            # ─────────────────────────────────────────────────────────────
+            break
         if tick % 12 == 0: print(f"    [{tick*5}s] masih loading ...")
         if tick > 120: print("  ⚠️ Timeout 600s — lanjut ..."); break
 
-def export_xlsx(driver, search_dirs=None):
+def export_xlsx(driver, search_dirs=None, ss=None, prefix=""):
     print("\n  📤 Export XLSX ...")
     driver.switch_to.default_content(); time.sleep(2)
 
@@ -254,7 +367,18 @@ def export_xlsx(driver, search_dirs=None):
             do_click(driver, el, hx, hy); time.sleep(3)
             if dropdown_open(): ex, ey = hx, hy; break
 
-    if not dropdown_open(): print("  ❌ Dropdown tidak bisa dibuka!"); return None
+    if not dropdown_open():
+        # ── SCREENSHOT jika dropdown gagal ──────────────────────────────
+        if ss:
+            take_screenshot(driver, f"{prefix}_export_dropdown_failed",
+                            ss["drive_service"], ss["folder_id"])
+        print("  ❌ Dropdown tidak bisa dibuka!"); return None
+
+    # ── SCREENSHOT dropdown terbuka ──────────────────────────────────────
+    if ss:
+        take_screenshot(driver, f"{prefix}_export_dropdown_open",
+                        ss["drive_service"], ss["folder_id"])
+    # ─────────────────────────────────────────────────────────────────────
 
     raw = driver.execute_script(
         "var res=[];"
@@ -310,13 +434,23 @@ def export_xlsx(driver, search_dirs=None):
         time.sleep(5); fresh = scan_downloads(sdirs)
         if fresh:
             f = max(fresh, key=os.path.getmtime)
-            print(f"  ✅ Download: {f}  ({os.path.getsize(f):,} bytes)"); return f
+            print(f"  ✅ Download: {f}  ({os.path.getsize(f):,} bytes)")
+            # ── SCREENSHOT setelah download berhasil ─────────────────────
+            if ss:
+                take_screenshot(driver, f"{prefix}_download_success",
+                                ss["drive_service"], ss["folder_id"])
+            # ─────────────────────────────────────────────────────────────
+            return f
         if (i+1) % 6 == 0: print(f"    [{(i+1)*5}s] belum ada file ...")
         else: print(f"    [{(i+1)*5}s] menunggu ...")
+
+    # ── SCREENSHOT jika timeout download ─────────────────────────────────
+    if ss:
+        take_screenshot(driver, f"{prefix}_download_timeout",
+                        ss["drive_service"], ss["folder_id"])
     print("  ❌ Timeout download!"); return None
 
 def save_to_export(local_file, name_prefix):
-    """Simpan backup ke /tmp/jasper_exports/ (ganti save_to_drive untuk Actions)."""
     if not local_file or not os.path.exists(local_file): return None
     ext  = os.path.splitext(local_file)[1]
     dest = os.path.join(FOLDER_OUT, f"{name_prefix}_{TODAY_LABEL}{ext}")
@@ -362,10 +496,11 @@ def save_to_gsheet(gc, local_file, tab, label):
     except Exception as e:
         print(f"  ❌ GSheet error: {e}\n{traceback.format_exc()}"); return None
 
-def bot_footer(export_path, gsheet_url, tab):
+def bot_footer(export_path, gsheet_url, tab, folder_link=None):
     print(f"\n{'='*60}\n  🎉 SELESAI!")
     if export_path:  print(f"  📁 Backup : {export_path}")
     if gsheet_url:   print(f"  📊 GSheet : {gsheet_url}  (tab: {tab})")
+    if folder_link:  print(f"  📸 Drive  : {folder_link}")
     print(f"{'='*60}")
 
 def open_new_tab(driver):
@@ -461,28 +596,38 @@ def validate_dates_v74(driver):
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
     return so, eo
 
-def run_cell2(driver, gc):
+def run_cell2(driver, gc, ss=None):
     print("\n" + "="*60)
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
     print("="*60)
+    if ss: ss["prefix"] = "C2"
     try:
         driver.get(BOT74_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
+
+        # ── SCREENSHOT halaman form ──────────────────────────────────────
+        if ss: take_screenshot(driver, "C2_form_loaded", ss["drive_service"], ss["folder_id"])
+
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
         fill_date_v74(driver, "End Date",   1); time.sleep(0.8)
         select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
+
+        # ── SCREENSHOT setelah isi form ──────────────────────────────────
+        if ss: take_screenshot(driver, "C2_form_filled", ss["drive_service"], ss["folder_id"])
+
         so, eo = validate_dates_v74(driver)
         if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
-        click_apply_dialog(driver)
-        wait_loading(driver)
+        click_apply_dialog(driver, ss)
+        wait_loading(driver, ss, "C2")
         time.sleep(3)
-        downloaded = export_xlsx(driver)
+        downloaded = export_xlsx(driver, ss=ss, prefix="C2")
         if downloaded:
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
-            bot_footer(exp, url, "Data")
+            bot_footer(exp, url, "Data",
+                       folder_link=ss.get("folder_link") if ss else None)
         else:
             print("\n  ⚠️  Download gagal")
     except SystemExit as se: print(f"\n  🛑  {se}")
@@ -639,27 +784,37 @@ def select_shipment_status(driver, target="CO"):
         if attempt < 2: time.sleep(1)
     print("  ⚠️  Shipment Status: tidak bisa konfirmasi, lanjut ..."); return True
 
-def run_cell3(driver, gc):
+def run_cell3(driver, gc, ss=None):
     print("\n" + "="*60)
     print("  🤖  CELL 3 — BOT v75 CO : Monitor SJ Detail (CO)")
     print("="*60)
+    if ss: ss["prefix"] = "C3"
     try:
         driver.get(BOT75CO_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
+
+        # ── SCREENSHOT halaman form ──────────────────────────────────────
+        if ss: take_screenshot(driver, "C3_form_loaded", ss["drive_service"], ss["folder_id"])
+
         print("\n  📋  Input Controls ...")
         fill_date_dialog(driver, "When Start", 0); time.sleep(0.8)
         fill_date_dialog(driver, "When End",   1); time.sleep(0.8)
         select_branch_locator(driver, "01");        time.sleep(0.8)
         select_shipment_status(driver, "CO");       time.sleep(0.8)
-        click_apply_dialog(driver)
-        wait_loading(driver)
+
+        # ── SCREENSHOT setelah isi form ──────────────────────────────────
+        if ss: take_screenshot(driver, "C3_form_filled", ss["drive_service"], ss["folder_id"])
+
+        click_apply_dialog(driver, ss)
+        wait_loading(driver, ss, "C3")
         time.sleep(3)
-        downloaded = export_xlsx(driver)
+        downloaded = export_xlsx(driver, ss=ss, prefix="C3")
         if downloaded:
             exp = save_to_export(downloaded, "MonitorSuratJalan_CO")
             url = save_to_gsheet(gc, downloaded, "CO", "Monitor SJ CO")
-            bot_footer(exp, url, "CO")
+            bot_footer(exp, url, "CO",
+                       folder_link=ss.get("folder_link") if ss else None)
         else:
             print("\n  ⚠️  Download gagal")
     except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
@@ -753,24 +908,34 @@ def select_branch_ip(driver):
         if attempt < 2: time.sleep(1.5)
     print("  ⚠️  Branch: tidak bisa konfirmasi, lanjut ..."); return True
 
-def run_cell4(driver, gc):
+def run_cell4(driver, gc, ss=None):
     print("\n" + "="*60)
     print("  🤖  CELL 4 — BOT v75 IP : Monitor SJ In Progress (IP)")
     print("="*60)
+    if ss: ss["prefix"] = "C4"
     try:
         driver.get(BOT75IP_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
+
+        # ── SCREENSHOT halaman form ──────────────────────────────────────
+        if ss: take_screenshot(driver, "C4_form_loaded", ss["drive_service"], ss["folder_id"])
+
         print("\n  📋  Input Controls ...")
         select_branch_ip(driver); time.sleep(0.8)
-        click_apply_dialog(driver)
-        wait_loading(driver)
+
+        # ── SCREENSHOT setelah isi form ──────────────────────────────────
+        if ss: take_screenshot(driver, "C4_form_filled", ss["drive_service"], ss["folder_id"])
+
+        click_apply_dialog(driver, ss)
+        wait_loading(driver, ss, "C4")
         time.sleep(3)
-        downloaded = export_xlsx(driver)
+        downloaded = export_xlsx(driver, ss=ss, prefix="C4")
         if downloaded:
             exp = save_to_export(downloaded, "MonitorSuratJalan_IP")
             url = save_to_gsheet(gc, downloaded, "IP", "Monitor SJ IP")
-            bot_footer(exp, url, "IP")
+            bot_footer(exp, url, "IP",
+                       folder_link=ss.get("folder_link") if ss else None)
         else:
             print("\n  ⚠️  Download gagal")
     except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
@@ -850,12 +1015,11 @@ def select_date_erp(driver, label_text, index):
     except Exception as e:
         print(f"   ⚠️ Gagal memilih tanggal {label_text}: {e}")
 
-def run_cell5(driver, gc):
+def run_cell5(driver, gc, ss=None):
     print("\n" + "="*60)
     print("  🤖  CELL 5 — iDempiere ERP → tab 'IP_iDempiere'")
     print("="*60)
 
-    # Alihkan CDP ke folder ERP
     try:
         driver.execute_cdp_cmd("Page.setDownloadBehavior",
             {"behavior": "allow", "downloadPath": C5_DOWNLOAD_DIR})
@@ -866,9 +1030,12 @@ def run_cell5(driver, gc):
     c5_wait = WebDriverWait(driver, 20)
 
     try:
-        # 1. LOGIN ERP
         print("  🌐  Membuka halaman login iDempiere ...")
         driver.get(ERP_URL); time.sleep(5)
+
+        # ── SCREENSHOT halaman login ERP ─────────────────────────────────
+        if ss: take_screenshot(driver, "C5_erp_login_page", ss["drive_service"], ss["folder_id"])
+
         print("  🔑  Proses Login ...")
         user_xpath = "(//input[contains(@class, 'z-textbox') or @type='text'])[1]"
         pass_xpath = "//input[@type='password']"
@@ -881,22 +1048,24 @@ def run_cell5(driver, gc):
         driver.execute_script("arguments[0].click();", login_btn)
         print("  ⏳  Menunggu workspace (15s) ..."); time.sleep(15)
 
-        # 2. BUKA MENU TRANSACTION DETAIL
+        # ── SCREENSHOT setelah login ERP ─────────────────────────────────
+        if ss: take_screenshot(driver, "C5_erp_workspace", ss["drive_service"], ss["folder_id"])
+
         print("  📂  Membuka menu Transaction Detail ...")
         menu_item = c5_wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//span[normalize-space(text())='Transaction Detail']")))
         driver.execute_script("arguments[0].click();", menu_item); time.sleep(8)
 
-        # 3. ISI FORM
         print("  📝  Mengisi form ...")
         fill_text_field_erp(driver, c5_wait, "Organization", "TRA")
         fill_text_field_erp(driver, c5_wait, "Warehouse", "TRA-JKT")
 
-        # 4. PILIH TANGGAL
+        # ── SCREENSHOT form ERP ──────────────────────────────────────────
+        if ss: take_screenshot(driver, "C5_erp_form_filled", ss["drive_service"], ss["folder_id"])
+
         select_date_erp(driver, "Movement Date", 1)
         select_date_erp(driver, "Movement Date", 2)
 
-        # 5. KLIK OK
         print("  🚀  Klik tombol OK ...")
         ok_xpath = (
             "//button[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK') "
@@ -911,7 +1080,9 @@ def run_cell5(driver, gc):
         if not clicked: raise Exception("Tombol OK tidak ditemukan.")
         print("  ⏳  Generate report (20s) ..."); time.sleep(20)
 
-        # 6. FORMAT XLS & DOWNLOAD
+        # ── SCREENSHOT report ERP ────────────────────────────────────────
+        if ss: take_screenshot(driver, "C5_erp_report_generated", ss["drive_service"], ss["folder_id"])
+
         print("  🔄  Format → XLS ...")
         pdf_selects = driver.find_elements(By.XPATH, "//select[option[contains(text(), 'PDF')]]")
         if pdf_selects:
@@ -942,10 +1113,14 @@ def run_cell5(driver, gc):
             driver.find_element(By.XPATH, "//*[text()='Save to File']").click()
         print("  ✅  Save to File diklik"); time.sleep(10)
 
+        # ── SCREENSHOT setelah save to file ─────────────────────────────
+        if ss: take_screenshot(driver, "C5_erp_save_clicked", ss["drive_service"], ss["folder_id"])
+
     except Exception as e:
+        # ── SCREENSHOT error ──────────────────────────────────────────────
+        if ss: take_screenshot(driver, "C5_erp_ERROR", ss["drive_service"], ss["folder_id"])
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
-    # 7. KONVERSI + UPLOAD (di luar try agar selalu dijalankan)
     try:
         files = os.listdir(C5_DOWNLOAD_DIR)
         if files:
@@ -956,7 +1131,8 @@ def run_cell5(driver, gc):
                 latest_file = convert_xls_to_xlsx(latest_file)
             exp = save_to_export(latest_file, "MonitorSuratJalan_IP_iDempiere")
             url = save_to_gsheet(gc, latest_file, "IP_iDempiere", "Monitor SJ IP (iDempiere)")
-            bot_footer(exp, url, "IP_iDempiere")
+            bot_footer(exp, url, "IP_iDempiere",
+                       folder_link=ss.get("folder_link") if ss else None)
         else:
             print("\n  ⚠️  Tidak ada file di folder download ERP.")
     except Exception as e:
@@ -965,10 +1141,28 @@ def run_cell5(driver, gc):
 # =============================================================================
 # MAIN — 1 driver, 1 login, 4 tab
 # =============================================================================
-def run_all_shared(gc, cells):
+def run_all_shared(gc, creds_info, cells):
+    # ── Inisialisasi Drive service & buat folder screenshot ──────────────
+    print("\n  📸  Inisialisasi Google Drive untuk screenshot ...")
+    try:
+        drive_service = init_drive_service(creds_info)
+        folder_id     = get_or_create_drive_folder(drive_service, GDRIVE_SCREENSHOT_FOLDER_NAME)
+        # Link ke folder Drive (bisa dibuka di browser)
+        folder_link   = f"https://drive.google.com/drive/folders/{folder_id}"
+        print(f"  ✅  Screenshot folder: {folder_link}")
+        ss = {
+            "drive_service": drive_service,
+            "folder_id":     folder_id,
+            "folder_link":   folder_link,
+            "prefix":        "",
+        }
+    except Exception as e:
+        print(f"  ⚠️  Drive init gagal (screenshot dinonaktifkan): {e}")
+        ss = None
+    # ─────────────────────────────────────────────────────────────────────
+
     driver = make_driver(DOWNLOAD_DIR)
     try:
-        # Set CDP download dir awal
         try:
             driver.execute_cdp_cmd("Page.setDownloadBehavior",
                 {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
@@ -976,37 +1170,40 @@ def run_all_shared(gc, cells):
         except Exception as e:
             print(f"  ⚠️  CDP: {e}")
 
-        # LOGIN 1x untuk cell 2/3/4 (Jasper)
         jasper_cells = [c for c in cells if c in (2, 3, 4)]
-        erp_cells    = [c for c in cells if c == 5]
 
         if jasper_cells:
             print("\n" + "="*60)
             print("  🔑  LOGIN JASPER (1x untuk semua Cell 2/3/4)")
             print("="*60)
-            do_login(driver)
+            do_login(driver, ss)
 
         first_tab = driver.window_handles[0]
 
         for cell in cells:
             if cell in (2, 3, 4):
-                # Pastikan CDP kembali ke jasper downloads
                 try:
                     driver.execute_cdp_cmd("Page.setDownloadBehavior",
                         {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
                 except: pass
                 open_new_tab(driver)
-                if   cell == 2: run_cell2(driver, gc)
-                elif cell == 3: run_cell3(driver, gc)
-                elif cell == 4: run_cell4(driver, gc)
+                if   cell == 2: run_cell2(driver, gc, ss)
+                elif cell == 3: run_cell3(driver, gc, ss)
+                elif cell == 4: run_cell4(driver, gc, ss)
                 driver.switch_to.window(first_tab)
                 print(f"  ↩️   Kembali ke tab utama")
 
             elif cell == 5:
                 open_new_tab(driver)
-                run_cell5(driver, gc)   # CDP dialihkan di dalam run_cell5
+                run_cell5(driver, gc, ss)
                 driver.switch_to.window(first_tab)
                 print(f"  ↩️   Kembali ke tab utama")
+
+        # ── SCREENSHOT akhir (ringkasan) ──────────────────────────────────
+        if ss:
+            take_screenshot(driver, "ZZ_bot_selesai", ss["drive_service"], ss["folder_id"])
+            print(f"\n  📸  Semua screenshot tersimpan di:")
+            print(f"      {ss['folder_link']}")
 
     finally:
         try: driver.quit()
@@ -1019,8 +1216,9 @@ if __name__ == "__main__":
     cells = [2, 3, 4, 5]
     print(f"   Cell    : {cells}")
     print(f"   Mode    : 1 browser → 1 login → {len(cells)} tab")
+    print(f"   Screenshot → Google Drive folder: {GDRIVE_SCREENSHOT_FOLDER_NAME}")
 
-    gc = init_gc()
-    run_all_shared(gc, cells)
+    gc, creds_info = init_gc()
+    run_all_shared(gc, creds_info, cells)
 
     print(f"\n🏁 JasperBot SELESAI — {datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S WIB')}")
