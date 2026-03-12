@@ -82,13 +82,12 @@ def make_driver(download_dir=DOWNLOAD_DIR):
         "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
     })
     d = webdriver.Chrome(options=opts)
-    # Beri halaman waktu cukup untuk load (fix ReadTimeoutError)
     d.set_script_timeout(120)
-    d.implicitly_wait(0)           # jangan implicit wait, pakai explicit
+    d.implicitly_wait(0)
     return d
 
 # =============================================================================
-# HELPER FUNCTIONS  (identik dengan notebook)
+# HELPER FUNCTIONS
 # =============================================================================
 def clean_value(val):
     if val is None: return ''
@@ -316,7 +315,6 @@ def export_xlsx(driver, search_dirs=None):
     print("  ❌ Timeout download!"); return None
 
 def save_to_export(local_file, name_prefix):
-    """Simpan backup ke /tmp/jasper_exports/ (ganti save_to_drive untuk Actions)."""
     if not local_file or not os.path.exists(local_file): return None
     ext  = os.path.splitext(local_file)[1]
     dest = os.path.join(FOLDER_OUT, f"{name_prefix}_{TODAY_LABEL}{ext}")
@@ -380,7 +378,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
+BOT74_WAREHOUSE_GROUP = "SCM WHS POK"  # ← diubah dari "FUL WHS FG"
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -855,7 +853,6 @@ def run_cell5(driver, gc):
     print("  🤖  CELL 5 — iDempiere ERP → tab 'IP_iDempiere'")
     print("="*60)
 
-    # Alihkan CDP ke folder ERP
     try:
         driver.execute_cdp_cmd("Page.setDownloadBehavior",
             {"behavior": "allow", "downloadPath": C5_DOWNLOAD_DIR})
@@ -866,7 +863,6 @@ def run_cell5(driver, gc):
     c5_wait = WebDriverWait(driver, 20)
 
     try:
-        # 1. LOGIN ERP
         print("  🌐  Membuka halaman login iDempiere ...")
         driver.get(ERP_URL); time.sleep(5)
         print("  🔑  Proses Login ...")
@@ -881,22 +877,18 @@ def run_cell5(driver, gc):
         driver.execute_script("arguments[0].click();", login_btn)
         print("  ⏳  Menunggu workspace (15s) ..."); time.sleep(15)
 
-        # 2. BUKA MENU TRANSACTION DETAIL
         print("  📂  Membuka menu Transaction Detail ...")
         menu_item = c5_wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//span[normalize-space(text())='Transaction Detail']")))
         driver.execute_script("arguments[0].click();", menu_item); time.sleep(8)
 
-        # 3. ISI FORM
         print("  📝  Mengisi form ...")
         fill_text_field_erp(driver, c5_wait, "Organization", "TRA")
         fill_text_field_erp(driver, c5_wait, "Warehouse", "TRA-JKT")
 
-        # 4. PILIH TANGGAL
         select_date_erp(driver, "Movement Date", 1)
         select_date_erp(driver, "Movement Date", 2)
 
-        # 5. KLIK OK
         print("  🚀  Klik tombol OK ...")
         ok_xpath = (
             "//button[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK') "
@@ -911,7 +903,6 @@ def run_cell5(driver, gc):
         if not clicked: raise Exception("Tombol OK tidak ditemukan.")
         print("  ⏳  Generate report (20s) ..."); time.sleep(20)
 
-        # 6. FORMAT XLS & DOWNLOAD
         print("  🔄  Format → XLS ...")
         pdf_selects = driver.find_elements(By.XPATH, "//select[option[contains(text(), 'PDF')]]")
         if pdf_selects:
@@ -945,7 +936,6 @@ def run_cell5(driver, gc):
     except Exception as e:
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
-    # 7. KONVERSI + UPLOAD (di luar try agar selalu dijalankan)
     try:
         files = os.listdir(C5_DOWNLOAD_DIR)
         if files:
@@ -968,7 +958,6 @@ def run_cell5(driver, gc):
 def run_all_shared(gc, cells):
     driver = make_driver(DOWNLOAD_DIR)
     try:
-        # Set CDP download dir awal
         try:
             driver.execute_cdp_cmd("Page.setDownloadBehavior",
                 {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
@@ -976,7 +965,6 @@ def run_all_shared(gc, cells):
         except Exception as e:
             print(f"  ⚠️  CDP: {e}")
 
-        # LOGIN 1x untuk cell 2/3/4 (Jasper)
         jasper_cells = [c for c in cells if c in (2, 3, 4)]
         erp_cells    = [c for c in cells if c == 5]
 
@@ -990,7 +978,6 @@ def run_all_shared(gc, cells):
 
         for cell in cells:
             if cell in (2, 3, 4):
-                # Pastikan CDP kembali ke jasper downloads
                 try:
                     driver.execute_cdp_cmd("Page.setDownloadBehavior",
                         {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
@@ -1004,7 +991,7 @@ def run_all_shared(gc, cells):
 
             elif cell == 5:
                 open_new_tab(driver)
-                run_cell5(driver, gc)   # CDP dialihkan di dalam run_cell5
+                run_cell5(driver, gc)
                 driver.switch_to.window(first_tab)
                 print(f"  ↩️   Kembali ke tab utama")
 
