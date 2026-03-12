@@ -169,6 +169,8 @@ def do_login(driver):
 
 def click_apply_dialog(driver):
     print("\n  🔵 Klik Apply ...")
+    # Pastikan di frame yang benar
+    switch_to_jasper_frame(driver)
     btn = None
     for sel in [(By.ID, "apply"), (By.CSS_SELECTOR, "button#apply"),
                 (By.XPATH, "//button[normalize-space()='Apply']"),
@@ -381,14 +383,45 @@ BOT74_REPORT_URL = (
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"  # ← diubah dari "FUL WHS FG"
 
+def switch_to_jasper_frame(driver):
+    """Switch ke iframe input controls Jasper. Return True jika berhasil."""
+    driver.switch_to.default_content()
+    time.sleep(0.5)
+    # Coba masuk ke iframe yang mengandung input controls
+    for sel in ["iframe#reportContainer", "iframe[id*='report']",
+                "iframe[src*='jasper']", "iframe"]:
+        try:
+            frames = driver.find_elements(By.CSS_SELECTOR, sel)
+            for frame in frames:
+                try:
+                    driver.switch_to.frame(frame)
+                    # Verifikasi apakah ada input atau WarehouseGroup di dalamnya
+                    found = driver.execute_script(
+                        "return !!(document.querySelector('input.date') || "
+                        "document.querySelector('[id=\"WarehouseGroup\"]') || "
+                        "document.querySelector('#apply'));")
+                    if found:
+                        print(f"  → Switched to iframe: {sel}")
+                        return True
+                    driver.switch_to.default_content()
+                except: driver.switch_to.default_content(); continue
+        except: continue
+    # Tidak perlu iframe — konten langsung di main document
+    return False
+
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
     driver.switch_to.default_content()
+    # Coba switch ke iframe jika perlu
+    switch_to_jasper_frame(driver)
     try: driver.execute_script(
         "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+    if not inps:
+        # Fallback: cari semua input date
+        inps = driver.find_elements(By.CSS_SELECTOR, "input[type='text'].date, input.date")
     if index >= len(inps): print(f"  ❌  index {index} tidak ada!"); return False
     inp = inps[index]
     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
@@ -417,8 +450,13 @@ def fill_date_v74(driver, label, index):
 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
-    driver.switch_to.default_content()
+    # JANGAN switch_to.default_content() — tetap di frame yang sama dengan fill_date
     try:
+        # Tunggu elemen muncul max 15s
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.ID, "WarehouseGroup")))
+        except: pass
         wg = driver.find_element(By.ID, "WarehouseGroup")
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
 
@@ -528,7 +566,7 @@ def select_warehouse_group_v74(driver, item_text):
     except Exception as e: print(f"  ❌  {e}\n{traceback.format_exc()}"); return False
 
 def validate_dates_v74(driver):
-    driver.switch_to.default_content()
+    # Tetap di frame yang sama (tidak switch ke default)
     result = driver.execute_script(r"""
         var d={sv:'',ev:''};
         var inps=document.querySelectorAll('input.date.hasDatepicker');
@@ -548,6 +586,17 @@ def run_cell2(driver, gc):
         driver.get(BOT74_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
+        # Tunggu input controls muncul (max 30s)
+        print("  ⏳  Tunggu input controls ...")
+        for _ in range(30):
+            time.sleep(1)
+            switched = switch_to_jasper_frame(driver)
+            inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+            if inps:
+                print(f"  ✅  Input controls siap ({len(inps)} date inputs, frame={switched})")
+                break
+        else:
+            print("  ⚠️  Input controls timeout, lanjut ...")
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
         fill_date_v74(driver, "End Date",   1); time.sleep(0.8)
