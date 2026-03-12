@@ -27,7 +27,7 @@ import openpyxl, xlrd
 USERNAME     = "muhammad.prasetyo"
 PASSWORD     = "Adminhqacc12"
 BASE_URL     = "http://report.tangki.id/jasperserver"
-GSHEET_ID    = "14XX4dcIc18Kw7BXYmaa40BmhuluXRI_MBfgcr6GxdM0"
+GSHEET_ID    = "1BTAVmWs-9GZpJcO2Kv2zEtV2jy680wHASboIeArqb9U"
 WIB          = timezone(timedelta(hours=7))
 TODAY_STR    = datetime.now(WIB).strftime("%Y-%m-%d")
 TODAY_LABEL  = datetime.now(WIB).strftime("%Y%m%d")
