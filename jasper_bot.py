@@ -381,33 +381,33 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "SCM WHS POK"  # ← diubah dari "FUL WHS FG"
+
+# ✅ FIX: nilai ini dicocokkan ke teks persis di dropdown Jasper
+BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
 def switch_to_jasper_frame(driver):
-    """Switch ke iframe input controls Jasper. Return True jika berhasil."""
+    """Switch ke iframe input controls Jasper jika ada. Return True jika masuk iframe."""
     driver.switch_to.default_content()
     time.sleep(0.5)
-    # Coba masuk ke iframe yang mengandung input controls
     for sel in ["iframe#reportContainer", "iframe[id*='report']",
                 "iframe[src*='jasper']", "iframe"]:
         try:
             frames = driver.find_elements(By.CSS_SELECTOR, sel)
             for frame in frames:
-                try:
+                 try:
                     driver.switch_to.frame(frame)
-                    # Verifikasi apakah ada input atau WarehouseGroup di dalamnya
                     found = driver.execute_script(
                         "return !!(document.querySelector('input.date') || "
-                        "document.querySelector('[id=\"WarehouseGroup\"]') || "
+                        "document.querySelector('a.jr-mSingleselect-input') || "
                         "document.querySelector('#apply'));")
                     if found:
                         print(f"  → Switched to iframe: {sel}")
                         return True
                     driver.switch_to.default_content()
-                except: driver.switch_to.default_content(); continue
+                except:
+                    driver.switch_to.default_content(); continue
         except: continue
-    # Tidak perlu iframe — konten langsung di main document
-    return False
+    return False  # konten langsung di main document
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -449,7 +449,7 @@ def fill_date_v74(driver, label, index):
     print(f"  ❌  {label} GAGAL!"); return False
 
 def select_warehouse_group_v74(driver, item_text):
-    print(f"  📦  Warehouse Group: '{item_text}'")
+    print(f"  📦 Warehouse Group: '{item_text}'")
     # JANGAN switch_to.default_content() — tetap di frame yang sama dengan fill_date
     try:
         # Tunggu elemen muncul max 15s
