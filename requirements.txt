@@ -3,3 +3,4 @@ webdriver-manager
 gspread
 google-auth
 openpyxl
+google-api-python-client
