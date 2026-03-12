@@ -24,8 +24,8 @@ import openpyxl, xlrd
 # =============================================================================
 # KONFIGURASI
 # =============================================================================
-USERNAME     = "agus.widodo"
-PASSWORD     = "kampret99"
+USERNAME     = "muhammad.prasetyo"
+PASSWORD     = "Adminhqacc12"
 BASE_URL     = "http://report.tangki.id/jasperserver"
 GSHEET_ID    = "1DPIh2FZBAFXCaj_AbsXiMR1qSBmt4QXcp4kQ8iZXTGg"
 WIB          = timezone(timedelta(hours=7))
@@ -40,8 +40,8 @@ C5_SEARCH_DIRS  = [C5_DOWNLOAD_DIR, "/tmp"]
 EXTENSIONS      = ["*.xls", "*.xlsx", "*.XLS", "*.XLSX"]
 
 ERP_URL  = "https://erp.tangki.id/webui/index.zul"
-ERP_USER = "damar.kismanto"
-ERP_PASS = "penguin777"
+ERP_USER = "muhammad.prasetyo"
+ERP_PASS = "Adminhqacc12"
 
 for d in [DOWNLOAD_DIR, C5_DOWNLOAD_DIR, FOLDER_OUT]:
     os.makedirs(d, exist_ok=True)
@@ -380,7 +380,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "FUL WHS FG"
+BOT74_WAREHOUSE_GROUP = "SCM WH POK"
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
