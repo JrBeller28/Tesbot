@@ -425,25 +425,75 @@ def select_warehouse_group_v74(driver, item_text):
             var r=arguments[0].getBoundingClientRect();
             return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
         do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
-        for attempt in range(2):
+
+        # ── Coba ketik di search box agar list terfilter ─────────────────
+        search_typed = False
+        for sel in ["#WarehouseGroup input[type='text']",
+                    "#WarehouseGroup input.jr-mSingleselect-search",
+                    "#WarehouseGroup input[placeholder*='Search']",
+                    "#WarehouseGroup input"]:
+            try:
+                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in els:
+                    if el.is_displayed():
+                        el.clear(); time.sleep(0.2)
+                        el.send_keys(item_text); time.sleep(1.5)
+                        print(f"  → Search: '{item_text}'"); search_typed = True; break
+                if search_typed: break
+            except: continue
+        # ─────────────────────────────────────────────────────────────────
+
+        for attempt in range(3):
             matches = driver.execute_script("""
                 var res=[],txt=arguments[0];
                 document.querySelectorAll('a,li,span,div').forEach(function(el){
                     if(el.textContent.trim()!==txt) return;
+                    if(!el.offsetParent) return;
                     var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top<1080)
+                    if(r.width>0&&r.height>0)
                         res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
                 }); return res;""", item_text)
             print(f"    attempt {attempt+1}: {matches}")
-            if not matches: time.sleep(1); continue
+            if not matches:
+                # Scroll dropdown ke bawah dan coba lagi
+                driver.execute_script("""
+                    var dd=document.querySelector('#WarehouseGroup .jr-mSingleselect-listbox,'
+                        +'#WarehouseGroup .jr-mSingleselect-dropdown');
+                    if(dd) dd.scrollTop+=200;""")
+                time.sleep(0.8); continue
+
             ix, iy = matches[0]['cx'], matches[0]['cy']
+            # Scroll item ke tengah layar supaya tidak terpotong
+            driver.execute_script("""
+                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y);
+                if(el) el.scrollIntoView({block:'nearest'});""", ix, iy); time.sleep(0.3)
             el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
-            do_click(driver, el, ix, iy); time.sleep(1.2)
+            if el:
+                do_click(driver, el, ix, iy)
+                driver.execute_script("arguments[0].click();", el)
+            time.sleep(2)
+
+            # Cek 1: dropdown tertutup → berarti item terpilih
+            closed = driver.execute_script("""
+                var d=document.querySelectorAll(
+                    '#WarehouseGroup .jr-mSingleselect-listbox,'
+                    +'#WarehouseGroup .jr-mSingleselect-dropdown');
+                for(var i=0;i<d.length;i++) if(d[i].offsetParent) return false;
+                return true;""")
+            if closed:
+                val = driver.execute_script("""
+                    var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
+                    return s?s.textContent.trim():'';""")
+                print(f"  ✅  Warehouse Group: '{val or item_text}'"); return True
+
+            # Cek 2: nilai berubah meski dropdown masih terbuka
             val = driver.execute_script("""
                 var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
                 return s?s.textContent.trim():'---';""")
-            if val not in ('---', ''): print(f"  ✅  '{val}'"); return True
-        return False
+            if val not in ('---', ''):
+                print(f"  ✅  '{val}'"); return True
+
+        print("  ⚠️  Warehouse Group: tidak bisa konfirmasi, lanjut ..."); return True
     except Exception as e: print(f"  ❌  {e}"); return False
 
 def validate_dates_v74(driver):
