@@ -377,7 +377,7 @@ def open_new_tab(driver):
 # =============================================================================
 BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
-    "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
+    "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummaryWithMR&ShipmentInternal(RawData)"
     "&standAlone=true"
 )
 BOT74_WAREHOUSE_GROUP = "SCM_WHS_POK"
