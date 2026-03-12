@@ -1,0 +1,92 @@
+name: Run JasperBot
+
+on:
+  push:
+    paths:
+      - '**.py'
+      - '**.yml'
+      - '**.yaml'
+  workflow_dispatch:
+    inputs:
+      cell:
+        description: 'Cell (2 3 4 5 atau kosong = semua)'
+        required: false
+        default: ''
+      deadline:
+        description: 'Jam target selesai WIB, misal: 07:02 (kosong = tidak ada deadline)'
+        required: false
+        default: ''
+
+concurrency:
+  group: jasperbot
+  cancel-in-progress: false  # run baru ANTRI, tidak cancel run sebelumnya
+
+jobs:
+  run-jasperbot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install selenium webdriver-manager gspread google-auth openpyxl xlrd
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run JasperBot
+        env:
+          JASPER_USERNAME:        ${{ secrets.JASPER_USERNAME }}
+          JASPER_PASSWORD:        ${{ secrets.JASPER_PASSWORD }}
+          JASPER_BASE_URL:        ${{ secrets.JASPER_BASE_URL }}
+          GSHEET_ID:              ${{ secrets.GSHEET_ID }}
+          GSHEET_CREDENTIALS_B64: ${{ secrets.GSHEET_CREDENTIALS_B64 }}
+          ERP_URL:                ${{ secrets.ERP_URL }}
+          ERP_USERNAME:           ${{ secrets.ERP_USERNAME }}
+          ERP_PASSWORD:           ${{ secrets.ERP_PASSWORD }}
+        run: |
+          # Bangun argumen cell
+          CELL_ARGS=""
+          INPUT_CELL="${{ github.event.inputs.cell }}"
+          if [ -n "$INPUT_CELL" ]; then
+            for c in $INPUT_CELL; do
+              CELL_ARGS="$CELL_ARGS --cell $c"
+            done
+          fi
+          # Bangun argumen deadline
+          DEADLINE="${{ github.event.inputs.deadline }}"
+          DEADLINE_ARG=""
+          if [ -n "$DEADLINE" ]; then
+            DEADLINE_ARG="--deadline $DEADLINE"
+            echo "🕐 DEADLINE MODE: target selesai $DEADLINE WIB"
+          else
+            echo "🔄 MODE BIASA: jalankan semua cell"
+          fi
+          python -u jasper_bot.py $CELL_ARGS $DEADLINE_ARG
+
+      - name: Upload Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_number }}
+          path: /tmp/screenshots/
+          if-no-files-found: warn
+
+      - name: Upload Exports & Downloads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jasperbot-${{ github.run_number }}
+          path: |
+            /tmp/jasper_downloads/
+            /tmp/jasper_exports/
+            /tmp/erp_downloads/
+          retention-days: 3
+          if-no-files-found: ignore
