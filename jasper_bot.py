@@ -489,12 +489,12 @@ def run_cell2(driver, gc):
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
-# CELL 3 — Monitor SJ Detail CO → tab "CO"
+# CELL 3 — Monitor MM Real Time → tab "MMRT"
 # =============================================================================
 BOT75CO_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
-    "&ParentFolderUri=%2FiDempiere%2FInventory%2FStock"
-    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMonitor_Status_Surat_Jalan_Detail_Rev2"
+    "&ParentFolderUri=%2FiDempiere%2FLogistik%2FMonitor_Trx%2FInventory"
+    "&reportUnit=%2FiDempiere%2FLogistik%2FMonitor_Trx%2FInventory%2FMonitor_Status_Inventory_Move_(Real_Time)"
     "&standAlone=true"
 )
 
