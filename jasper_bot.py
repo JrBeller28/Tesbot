@@ -14,7 +14,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 
 
 
@@ -83,12 +82,13 @@ def make_driver(download_dir=DOWNLOAD_DIR):
         "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
     })
     d = webdriver.Chrome(options=opts)
+    # Beri halaman waktu cukup untuk load (fix ReadTimeoutError)
     d.set_script_timeout(120)
-    d.implicitly_wait(0)
+    d.implicitly_wait(0)           # jangan implicit wait, pakai explicit
     return d
 
 # =============================================================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS  (identik dengan notebook)
 # =============================================================================
 def clean_value(val):
     if val is None: return ''
@@ -169,8 +169,6 @@ def do_login(driver):
 
 def click_apply_dialog(driver):
     print("\n  🔵 Klik Apply ...")
-    # Pastikan di frame yang benar
-    switch_to_jasper_frame(driver)
     btn = None
     for sel in [(By.ID, "apply"), (By.CSS_SELECTOR, "button#apply"),
                 (By.XPATH, "//button[normalize-space()='Apply']"),
@@ -318,6 +316,7 @@ def export_xlsx(driver, search_dirs=None):
     print("  ❌ Timeout download!"); return None
 
 def save_to_export(local_file, name_prefix):
+    """Simpan backup ke /tmp/jasper_exports/ (ganti save_to_drive untuk Actions)."""
     if not local_file or not os.path.exists(local_file): return None
     ext  = os.path.splitext(local_file)[1]
     dest = os.path.join(FOLDER_OUT, f"{name_prefix}_{TODAY_LABEL}{ext}")
@@ -376,50 +375,21 @@ def open_new_tab(driver):
 # =============================================================================
 # CELL 2 — Material Transaction Summary → tab "Data"
 # =============================================================================
- BOT74_REPORT_URL = (
+BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
- 
-# ✅ FIX: nilai ini dicocokkan ke teks persis di dropdown Jasper
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
- 
-def switch_to_jasper_frame(driver):
-    """Switch ke iframe input controls Jasper jika ada. Return True jika masuk iframe."""
-    driver.switch_to.default_content()
-    time.sleep(0.5)
-    for sel in ["iframe#reportContainer", "iframe[id*='report']",
-                "iframe[src*='jasper']", "iframe"]:
-        try:
-            frames = driver.find_elements(By.CSS_SELECTOR, sel)
-            for frame in frames:
-                try:
-                    driver.switch_to.frame(frame)
-                    found = driver.execute_script(
-                        "return !!(document.querySelector('input.date') || "
-                        "document.querySelector('a.jr-mSingleselect-input') || "
-                        "document.querySelector('#apply'));")
-                    if found:
-                        print(f"  → Switched to iframe: {sel}")
-                        return True
-                    driver.switch_to.default_content()
-                except:
-                    driver.switch_to.default_content(); continue
-        except: continue
-    return False  # konten langsung di main document
- 
+
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
     driver.switch_to.default_content()
-    switch_to_jasper_frame(driver)
     try: driver.execute_script(
         "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if not inps:
-        inps = driver.find_elements(By.CSS_SELECTOR, "input[type='text'].date, input.date")
     if index >= len(inps): print(f"  ❌  index {index} tidak ada!"); return False
     inp = inps[index]
     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
@@ -445,234 +415,41 @@ def fill_date_v74(driver, label, index):
         if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
     except Exception as e: print(f"  ⚠️  S2: {e}")
     print(f"  ❌  {label} GAGAL!"); return False
- 
-# =============================================================================
-# ✅ FIX UTAMA — select_warehouse_group_v74
-#
-# ROOT CAUSE masalah lama:
-#   1. driver.find_element(By.ID, "WarehouseGroup") → ID ini tidak ada di halaman!
-#      Screenshot menunjukkan field bernama "Warehouse", bukan "WarehouseGroup"
-#   2. Kode mencari <select> di dalam #WarehouseGroup → tidak pernah ketemu
-#   3. Akibatnya dropdown tidak pernah diklik, nilai tetap "---"
-#
-# FIX:
-#   - Cari dropdown berdasarkan LABEL TEXT ("Warehouse") bukan ID
-#   - Pakai 3 strategi fallback yang robust
-# =============================================================================
+
 def select_warehouse_group_v74(driver, item_text):
-    print(f"  📦  Warehouse: '{item_text}'")
- 
-    # Pastikan tetap di frame yang benar
-    switch_to_jasper_frame(driver)
-    time.sleep(0.5)
- 
-    # ── Debug: print semua label yang ada di halaman ──────────────────────────
-    all_labels = driver.execute_script("""
-        var res = [];
-        document.querySelectorAll('label, .jr-mControl-label, .control.input span, td > span')
-            .forEach(function(el) {
-                var t = el.textContent.trim();
-                if (t && t.length < 60) res.push(t);
-            });
-        return res;
-    """)
-    print(f"  ℹ️  Label ditemukan: {all_labels}")
- 
-    # ── Cari indeks dropdown berdasarkan label "Warehouse" ───────────────────
-    # Jasper merender setiap field sebagai pasangan: label → toggle anchor
-    # Kita cari posisi label "Warehouse" lalu ambil toggle ke-N yang sesuai
-    dropdown_index = driver.execute_script("""
-        var target = arguments[0].toLowerCase();
-        var labels = document.querySelectorAll(
-            'label, .jr-mControl-label, .control.input span, td > span, .jr-mSelect-label');
-        for (var i = 0; i < labels.length; i++) {
-            if (labels[i].textContent.trim().toLowerCase() === target) {
-                return i;
-            }
-        }
-        // Fallback: cari yang mengandung teks
-        for (var j = 0; j < labels.length; j++) {
-            if (labels[j].textContent.trim().toLowerCase().indexOf(target) > -1) {
-                return j;
-            }
-        }
-        return -1;
-    """, "warehouse")
-    print(f"  ℹ️  Label 'Warehouse' index: {dropdown_index}")
- 
-    # ── STRATEGI 1: Klik toggle berdasarkan posisi label ─────────────────────
-    toggle_clicked = False
-    toggles = driver.find_elements(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
-    toggles = [t for t in toggles if t.is_displayed()]
-    print(f"  ℹ️  Toggle visible: {len(toggles)}")
- 
-    # Coba pakai index dari label (biasanya label ke-N → toggle ke-N)
-    if dropdown_index >= 0 and dropdown_index < len(toggles):
-        toggle = toggles[dropdown_index]
-    elif len(toggles) >= 2:
-        # Fallback: "Warehouse" biasanya dropdown ke-2 (index 1)
-        # urutan: Organization(0) → Warehouse(1) → Product Category(2) → Product(3)
-        toggle = toggles[1]
-        print(f"  ⚠️  Pakai fallback toggle index 1")
-    elif len(toggles) == 1:
-        toggle = toggles[0]
-    else:
-        print("  ❌  Tidak ada toggle ditemukan!"); return False
- 
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
-    time.sleep(0.5)
- 
-    # Klik toggle untuk buka dropdown
-    for click_method in ["js", "action"]:
-        try:
-            if click_method == "js":
-                driver.execute_script("arguments[0].click();", toggle)
-            else:
-                ActionChains(driver).move_to_element(toggle).pause(0.3).click().perform()
-            time.sleep(2.5)
-            # Cek apakah dropdown terbuka
-            opened = driver.execute_script("""
-                var d = document.querySelectorAll(
-                    '.jr-mSingleselect-listbox, .jr-mSingleselect-dropdown, ' +
-                    '[class*="singleselect"] ul, [class*="SingleSelect"] ul');
-                for (var i = 0; i < d.length; i++) {
-                    if (d[i].offsetParent && d[i].children.length > 0) return true;
-                }
-                return false;
-            """)
-            if opened:
-                print(f"  ✅  Dropdown terbuka [{click_method}]")
-                toggle_clicked = True
-                break
-        except Exception as e:
-            print(f"  ⚠️  Klik {click_method}: {e}")
- 
-    if not toggle_clicked:
-        print("  ⚠️  Dropdown tidak terkonfirmasi terbuka, tetap lanjut cari item ...")
- 
-    # ── Ketik di search box jika ada ─────────────────────────────────────────
-    for css in [
-        "a.jr-mSingleselect-input + * input",
-        ".jr-mSingleselect-dropdown input",
-        ".jr-mSingleselect-listbox input",
-        "input.jr-mSingleselect-search",
-    ]:
-        try:
-            inp = driver.find_element(By.CSS_SELECTOR, css)
-            if inp.is_displayed():
-                inp.clear(); time.sleep(0.2)
-                inp.send_keys(item_text); time.sleep(1.5)
-                print(f"  → Ketik search: '{item_text}'")
-                break
-        except: continue
- 
-    # ── STRATEGI 2: Klik item via JavaScript (tidak pakai koordinat) ──────────
-    for attempt in range(5):
-        result = driver.execute_script("""
-            var txt = arguments[0];
-            var exactMatch = null, partialMatch = null;
- 
-            // Cari di semua kontainer dropdown yang mungkin
-            var selectors = [
-                '.jr-mSingleselect-listbox li',
-                '.jr-mSingleselect-dropdown li',
-                '.jr-mSingleselect-listbox a',
-                '.jr-mSingleselect-dropdown a',
-                '[class*="singleselect"] li',
-                '[class*="SingleSelect"] li',
-                '[class*="listbox"] li',
-                '[class*="dropDown"] li',
-                'ul.jr-mSelectlist li',
-            ];
- 
-            for (var s = 0; s < selectors.length; s++) {
-                var items = document.querySelectorAll(selectors[s]);
-                for (var i = 0; i < items.length; i++) {
-                    var el = items[i];
-                    if (!el.offsetParent) continue;  // skip hidden
-                    var t = el.textContent.trim();
-                    if (t === txt) { exactMatch = el; break; }
-                    if (!partialMatch && t.indexOf(txt) > -1) { partialMatch = el; }
-                }
-                if (exactMatch) break;
-            }
- 
-            var target = exactMatch || partialMatch;
-            if (target) {
-                target.scrollIntoView({block: 'nearest'});
-                target.click();
-                // Coba juga dispatchEvent untuk framework Jasper
-                target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
-                target.dispatchEvent(new MouseEvent('mouseup',   {bubbles:true}));
-                target.dispatchEvent(new MouseEvent('click',     {bubbles:true}));
-                return 'clicked:' + target.textContent.trim();
-            }
- 
-            // Debug: kembalikan semua item yang tersedia
-            var avail = [];
-            document.querySelectorAll(
-                '.jr-mSingleselect-listbox *, .jr-mSingleselect-dropdown *,' +
-                '[class*="listbox"] li, [class*="dropDown"] li'
-            ).forEach(function(el) {
-                if (!el.offsetParent) return;
-                var t = el.textContent.trim();
-                if (t && t.length > 1 && t.length < 80) avail.push(t);
-            });
-            return 'not_found:' + JSON.stringify([...new Set(avail)].slice(0, 15));
-        """, item_text)
- 
-        print(f"  → attempt {attempt+1}: {result}")
- 
-        if result and result.startswith("clicked:"):
-            time.sleep(1.5)
-            # Konfirmasi nilai terpilih
+    print(f"  📦  Warehouse Group: '{item_text}'")
+    driver.switch_to.default_content()
+    try:
+        wg = driver.find_element(By.ID, "WarehouseGroup")
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
+        toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
+        tr = driver.execute_script("""
+            var r=arguments[0].getBoundingClientRect();
+            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
+        do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
+        for attempt in range(2):
+            matches = driver.execute_script("""
+                var res=[],txt=arguments[0];
+                document.querySelectorAll('a,li,span,div').forEach(function(el){
+                    if(el.textContent.trim()!==txt) return;
+                    var r=el.getBoundingClientRect();
+                    if(r.width>0&&r.height>0&&r.top<1080)
+                        res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
+                }); return res;""", item_text)
+            print(f"    attempt {attempt+1}: {matches}")
+            if not matches: time.sleep(1); continue
+            ix, iy = matches[0]['cx'], matches[0]['cy']
+            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
+            do_click(driver, el, ix, iy); time.sleep(1.2)
             val = driver.execute_script("""
-                var sels = document.querySelectorAll(
-                    '.jr-mSingleselect-input-selection, ' +
-                    '[class*="singleselect"] [class*="selection"], ' +
-                    '[class*="singleselect"] [class*="value"]');
-                for (var i = 0; i < sels.length; i++) {
-                    var t = sels[i].textContent.trim();
-                    if (t && t !== '---') return t;
-                }
-                return '';
-            """)
-            if val and val != "---":
-                print(f"  ✅  Warehouse terpilih: '{val}'"); return True
-            # Dropdown mungkin sudah tertutup walau val belum terbaca
-            closed = driver.execute_script("""
-                var d = document.querySelectorAll(
-                    '.jr-mSingleselect-listbox, .jr-mSingleselect-dropdown');
-                for (var i = 0; i < d.length; i++) {
-                    if (d[i].offsetParent && d[i].children.length > 0) return false;
-                }
-                return true;
-            """)
-            if closed:
-                print(f"  ✅  Dropdown tertutup, asumsi '{item_text}' dipilih"); return True
- 
-        elif result and result.startswith("not_found:"):
-            # Scroll dropdown lalu coba lagi
-            driver.execute_script("""
-                var dd = document.querySelector(
-                    '.jr-mSingleselect-listbox, .jr-mSingleselect-dropdown, ' +
-                    '[class*="listbox"], [class*="dropDown"]');
-                if (dd) dd.scrollTop += 200;
-            """)
-            time.sleep(0.8)
-            if attempt == 2:
-                # Coba buka ulang dropdown
-                try:
-                    driver.execute_script("arguments[0].click();", toggle)
-                    time.sleep(2)
-                except: pass
- 
-    # ── STRATEGI 3: Fallback — biarkan default (semua warehouse) ─────────────
-    print(f"  ⚠️  Warehouse '{item_text}' tidak ditemukan — pakai nilai default ('---')")
-    print(f"  ℹ️  Bot tetap lanjut, report akan mengambil semua warehouse")
-    return True  # jangan stop bot hanya karena filter ini
- 
+                var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
+                return s?s.textContent.trim():'---';""")
+            if val not in ('---', ''): print(f"  ✅  '{val}'"); return True
+        return False
+    except Exception as e: print(f"  ❌  {e}"); return False
+
 def validate_dates_v74(driver):
+    driver.switch_to.default_content()
     result = driver.execute_script(r"""
         var d={sv:'',ev:''};
         var inps=document.querySelectorAll('input.date.hasDatepicker');
@@ -683,7 +460,7 @@ def validate_dates_v74(driver):
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
     return so, eo
- 
+
 def run_cell2(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
@@ -692,17 +469,6 @@ def run_cell2(driver, gc):
         driver.get(BOT74_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
-        print("  ⏳  Tunggu input controls ...")
-        for _ in range(30):
-            time.sleep(1)
-            switched = switch_to_jasper_frame(driver)
-            inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-            if inps:
-                print(f"  ✅  Input controls siap ({len(inps)} date inputs, frame={switched})")
-                break
-        else:
-            print("  ⚠️  Input controls timeout, lanjut ...")
- 
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
         fill_date_v74(driver, "End Date",   1); time.sleep(0.8)
@@ -1089,6 +855,7 @@ def run_cell5(driver, gc):
     print("  🤖  CELL 5 — iDempiere ERP → tab 'IP_iDempiere'")
     print("="*60)
 
+    # Alihkan CDP ke folder ERP
     try:
         driver.execute_cdp_cmd("Page.setDownloadBehavior",
             {"behavior": "allow", "downloadPath": C5_DOWNLOAD_DIR})
@@ -1099,6 +866,7 @@ def run_cell5(driver, gc):
     c5_wait = WebDriverWait(driver, 20)
 
     try:
+        # 1. LOGIN ERP
         print("  🌐  Membuka halaman login iDempiere ...")
         driver.get(ERP_URL); time.sleep(5)
         print("  🔑  Proses Login ...")
@@ -1113,18 +881,22 @@ def run_cell5(driver, gc):
         driver.execute_script("arguments[0].click();", login_btn)
         print("  ⏳  Menunggu workspace (15s) ..."); time.sleep(15)
 
+        # 2. BUKA MENU TRANSACTION DETAIL
         print("  📂  Membuka menu Transaction Detail ...")
         menu_item = c5_wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//span[normalize-space(text())='Transaction Detail']")))
         driver.execute_script("arguments[0].click();", menu_item); time.sleep(8)
 
+        # 3. ISI FORM
         print("  📝  Mengisi form ...")
         fill_text_field_erp(driver, c5_wait, "Organization", "TRA")
         fill_text_field_erp(driver, c5_wait, "Warehouse", "TRA-JKT")
 
+        # 4. PILIH TANGGAL
         select_date_erp(driver, "Movement Date", 1)
         select_date_erp(driver, "Movement Date", 2)
 
+        # 5. KLIK OK
         print("  🚀  Klik tombol OK ...")
         ok_xpath = (
             "//button[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK') "
@@ -1139,6 +911,7 @@ def run_cell5(driver, gc):
         if not clicked: raise Exception("Tombol OK tidak ditemukan.")
         print("  ⏳  Generate report (20s) ..."); time.sleep(20)
 
+        # 6. FORMAT XLS & DOWNLOAD
         print("  🔄  Format → XLS ...")
         pdf_selects = driver.find_elements(By.XPATH, "//select[option[contains(text(), 'PDF')]]")
         if pdf_selects:
@@ -1172,6 +945,7 @@ def run_cell5(driver, gc):
     except Exception as e:
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
+    # 7. KONVERSI + UPLOAD (di luar try agar selalu dijalankan)
     try:
         files = os.listdir(C5_DOWNLOAD_DIR)
         if files:
@@ -1194,6 +968,7 @@ def run_cell5(driver, gc):
 def run_all_shared(gc, cells):
     driver = make_driver(DOWNLOAD_DIR)
     try:
+        # Set CDP download dir awal
         try:
             driver.execute_cdp_cmd("Page.setDownloadBehavior",
                 {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
@@ -1201,6 +976,7 @@ def run_all_shared(gc, cells):
         except Exception as e:
             print(f"  ⚠️  CDP: {e}")
 
+        # LOGIN 1x untuk cell 2/3/4 (Jasper)
         jasper_cells = [c for c in cells if c in (2, 3, 4)]
         erp_cells    = [c for c in cells if c == 5]
 
@@ -1214,6 +990,7 @@ def run_all_shared(gc, cells):
 
         for cell in cells:
             if cell in (2, 3, 4):
+                # Pastikan CDP kembali ke jasper downloads
                 try:
                     driver.execute_cdp_cmd("Page.setDownloadBehavior",
                         {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
@@ -1227,7 +1004,7 @@ def run_all_shared(gc, cells):
 
             elif cell == 5:
                 open_new_tab(driver)
-                run_cell5(driver, gc)
+                run_cell5(driver, gc)   # CDP dialihkan di dalam run_cell5
                 driver.switch_to.window(first_tab)
                 print(f"  ↩️   Kembali ke tab utama")
 
