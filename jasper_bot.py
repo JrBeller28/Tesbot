@@ -379,7 +379,7 @@ BOT74_REPORT_URL = (
     "&standAlone=true"
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"  # ← diubah dari "FUL WHS FG"
-
+ 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
     driver.switch_to.default_content()
@@ -413,89 +413,119 @@ def fill_date_v74(driver, label, index):
         if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
     except Exception as e: print(f"  ⚠️  S2: {e}")
     print(f"  ❌  {label} GAGAL!"); return False
-
+ 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
         wg = driver.find_element(By.ID, "WarehouseGroup")
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
+ 
+        # ── STRATEGI 1: coba via <select> HTML biasa ────────────────────
+        try:
+            sel_el = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup select")
+            opts = sel_el.find_elements(By.TAG_NAME, "option")
+            for opt in opts:
+                if item_text.lower() in opt.text.lower():
+                    driver.execute_script("arguments[0].selected=true;", opt)
+                    driver.execute_script(
+                        "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", sel_el)
+                    time.sleep(1)
+                    print(f"  ✅  via <select>: '{opt.text}'"); return True
+        except: pass
+        # ────────────────────────────────────────────────────────────────
+ 
+        # ── STRATEGI 2: klik toggle, ketik search, klik item via DOM ───
         toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
-        tr = driver.execute_script("""
-            var r=arguments[0].getBoundingClientRect();
-            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
-        do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
-
-        # ── Coba ketik di search box agar list terfilter ─────────────────
+        driver.execute_script("arguments[0].click();", toggle); time.sleep(2.5)
+ 
+        # Ketik di search box (jika ada)
         search_typed = False
-        for sel in ["#WarehouseGroup input[type='text']",
+        for css in ["#WarehouseGroup input[type='text']",
                     "#WarehouseGroup input.jr-mSingleselect-search",
-                    "#WarehouseGroup input[placeholder*='Search']",
                     "#WarehouseGroup input"]:
             try:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
-                for el in els:
-                    if el.is_displayed():
-                        el.clear(); time.sleep(0.2)
-                        el.send_keys(item_text); time.sleep(1.5)
-                        print(f"  → Search: '{item_text}'"); search_typed = True; break
-                if search_typed: break
+                inp = driver.find_element(By.CSS_SELECTOR, css)
+                if inp.is_displayed():
+                    inp.clear(); time.sleep(0.2)
+                    inp.send_keys(item_text); time.sleep(1.5)
+                    print(f"  → Search: '{item_text}'"); search_typed = True; break
             except: continue
-        # ─────────────────────────────────────────────────────────────────
-
-        for attempt in range(3):
-            matches = driver.execute_script("""
-                var res=[],txt=arguments[0];
-                document.querySelectorAll('a,li,span,div').forEach(function(el){
-                    if(el.textContent.trim()!==txt) return;
-                    if(!el.offsetParent) return;
-                    var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0)
-                        res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
-                }); return res;""", item_text)
-            print(f"    attempt {attempt+1}: {matches}")
-            if not matches:
-                # Scroll dropdown ke bawah dan coba lagi
-                driver.execute_script("""
-                    var dd=document.querySelector('#WarehouseGroup .jr-mSingleselect-listbox,'
-                        +'#WarehouseGroup .jr-mSingleselect-dropdown');
-                    if(dd) dd.scrollTop+=200;""")
-                time.sleep(0.8); continue
-
-            ix, iy = matches[0]['cx'], matches[0]['cy']
-            # Scroll item ke tengah layar supaya tidak terpotong
-            driver.execute_script("""
-                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y);
-                if(el) el.scrollIntoView({block:'nearest'});""", ix, iy); time.sleep(0.3)
-            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
-            if el:
-                do_click(driver, el, ix, iy)
-                driver.execute_script("arguments[0].click();", el)
-            time.sleep(2)
-
-            # Cek 1: dropdown tertutup → berarti item terpilih
-            closed = driver.execute_script("""
-                var d=document.querySelectorAll(
-                    '#WarehouseGroup .jr-mSingleselect-listbox,'
-                    +'#WarehouseGroup .jr-mSingleselect-dropdown');
-                for(var i=0;i<d.length;i++) if(d[i].offsetParent) return false;
-                return true;""")
-            if closed:
+ 
+        # Klik item langsung via JavaScript DOM (tidak pakai koordinat)
+        for attempt in range(4):
+            clicked = driver.execute_script("""
+                var txt=arguments[0];
+                // Cari di semua kontainer listbox Jasper
+                var containers = document.querySelectorAll(
+                    '#WarehouseGroup .jr-mSingleselect-listbox li, '
+                    +'#WarehouseGroup .jr-mSingleselect-dropdown li, '
+                    +'#WarehouseGroup ul li, '
+                    +'#WarehouseGroup .jr-mSelectlist li');
+                for(var i=0;i<containers.length;i++){
+                    var t=containers[i].textContent.trim();
+                    if(t===txt || t.indexOf(txt)>-1){
+                        containers[i].scrollIntoView({block:'nearest'});
+                        containers[i].click();
+                        return 'li:'+t;
+                    }
+                }
+                // Fallback: cari semua elemen visible dengan teks persis
+                var all=document.querySelectorAll('a,li,div,span');
+                for(var j=0;j<all.length;j++){
+                    if(!all[j].offsetParent) continue;
+                    if(all[j].textContent.trim()!==txt) continue;
+                    var r=all[j].getBoundingClientRect();
+                    if(r.width<5||r.height<5) continue;
+                    all[j].scrollIntoView({block:'nearest'});
+                    all[j].click();
+                    return 'fallback:'+all[j].tagName;
+                }
+                return null;
+            """, item_text)
+            print(f"    attempt {attempt+1}: clicked={clicked}")
+ 
+            if clicked:
+                time.sleep(1.5)
+                # Cek apakah dropdown sudah tertutup
+                closed = driver.execute_script("""
+                    var d=document.querySelectorAll(
+                        '#WarehouseGroup .jr-mSingleselect-listbox,'
+                        +'#WarehouseGroup .jr-mSingleselect-dropdown,'
+                        +'#WarehouseGroup ul');
+                    for(var i=0;i<d.length;i++){
+                        if(d[i].offsetParent&&d[i].children.length>0) return false;
+                    } return true;""")
                 val = driver.execute_script("""
                     var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
                     return s?s.textContent.trim():'';""")
-                print(f"  ✅  Warehouse Group: '{val or item_text}'"); return True
-
-            # Cek 2: nilai berubah meski dropdown masih terbuka
-            val = driver.execute_script("""
-                var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
-                return s?s.textContent.trim():'---';""")
-            if val not in ('---', ''):
-                print(f"  ✅  '{val}'"); return True
-
+                print(f"  → closed={closed}, val='{val}'")
+                if closed or (val and val != '---'):
+                    print(f"  ✅  Warehouse Group: '{val or item_text}'"); return True
+            else:
+                # Scroll dropdown dan coba lagi
+                driver.execute_script("""
+                    var dd=document.querySelector(
+                        '#WarehouseGroup .jr-mSingleselect-listbox,'
+                        +'#WarehouseGroup .jr-mSingleselect-dropdown,'
+                        +'#WarehouseGroup ul');
+                    if(dd) dd.scrollTop+= 150;""")
+                time.sleep(0.8)
+ 
+        # ── STRATEGI 3: debug — print semua item di listbox ─────────────
+        all_items = driver.execute_script("""
+            var res=[];
+            document.querySelectorAll(
+                '#WarehouseGroup li, #WarehouseGroup .jr-mSingleselect-listbox *,'
+                +'#WarehouseGroup .jr-mSingleselect-dropdown *').forEach(function(el){
+                var t=el.textContent.trim();
+                if(t&&t.length<80&&t.length>1) res.push(t);
+            }); return [...new Set(res)].slice(0,20);""")
+        print(f"  ℹ️  Items tersedia: {all_items}")
+ 
         print("  ⚠️  Warehouse Group: tidak bisa konfirmasi, lanjut ..."); return True
-    except Exception as e: print(f"  ❌  {e}"); return False
-
+    except Exception as e: print(f"  ❌  {e}\n{traceback.format_exc()}"); return False
+ 
 def validate_dates_v74(driver):
     driver.switch_to.default_content()
     result = driver.execute_script(r"""
@@ -508,7 +538,7 @@ def validate_dates_v74(driver):
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
     return so, eo
-
+ 
 def run_cell2(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
@@ -535,6 +565,7 @@ def run_cell2(driver, gc):
             print("\n  ⚠️  Download gagal")
     except SystemExit as se: print(f"\n  🛑  {se}")
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+ 
 
 # =============================================================================
 # CELL 3 — Monitor SJ Detail CO → tab "CO"
