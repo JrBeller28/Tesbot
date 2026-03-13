@@ -466,7 +466,7 @@ def run_cell2(driver, gc):
     print("="*60)
     try:
         driver.get(BOT74_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        print("  ⏳  25s tunggu load ..."); time.sleep(600)
         wait_ready(driver)
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
