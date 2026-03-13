@@ -379,7 +379,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "-"
+BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -461,12 +461,12 @@ def validate_dates_v74(driver):
     return so, eo
 
 def run_cell2(driver, gc):
-    print("\n" + "="*240)
+    print("\n" + "="*60)
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
-    print("="*240)
+    print("="*60)
     try:
         driver.get(BOT74_REPORT_URL)
-        print("  ⏳  60s tunggu load ..."); time.sleep(60)
+        print("  ⏳  20s tunggu load ..."); time.sleep(20)
         wait_ready(driver)
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
