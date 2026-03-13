@@ -379,7 +379,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
+BOT74_WAREHOUSE_GROUP = ""
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -945,8 +945,8 @@ def run_cell5(driver, gc):
 
         # 3. ISI FORM
         print("  📝  Mengisi form ...")
-        fill_text_field_erp(driver, c5_wait, "Organization", "TRA")
-        fill_text_field_erp(driver, c5_wait, "Warehouse", "TRA-JKT")
+        fill_text_field_erp(driver, c5_wait, "Organization", "")
+        fill_text_field_erp(driver, c5_wait, "Warehouse", "")
 
         # 4. PILIH TANGGAL
         select_date_erp(driver, "Movement Date", 1)
