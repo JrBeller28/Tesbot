@@ -377,7 +377,7 @@ def open_new_tab(driver):
 # =============================================================================
 BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
-    "&reportUnit=/iDempiere/Inventory/Stock/Material_Transaction_Summary_With_MR_&_Shipment_Internal_(Raw_Data)
+    "&reportUnit=/iDempiere/Inventory/Stock/Material Transaction Summary With MR & Shipment Internal (Raw Data)
 
 "
     "&standAlone=true"
