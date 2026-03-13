@@ -374,9 +374,6 @@ def open_new_tab(driver):
 # =============================================================================
 # CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
 # =============================================================================
-# =============================================================================
-# CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
-# =============================================================================
 BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
     "&reportUnit=/iDempiere/Inventory/Stock/Material%20Transaction%20Summary%20With%20MR%20%26%20Shipment%20Internal%20(Raw%20Data)"
@@ -512,44 +509,58 @@ def validate_dates_v74(driver):
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
     return so, eo
-
 def run_cell2(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary With MR & Shipment Internal (Raw Data)")
     print("="*60)
     try:
         driver.get(BOT74_REPORT_URL)
-        # Tunggu dinamis ganti sleep(25)
-        print("  ⏳  Tunggu halaman load (max 90s)...")
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        try:
-            WebDriverWait(driver, 90).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input.date.hasDatepicker"))
-            )
-            time.sleep(3)
-            print("  ✅  Halaman siap!")
-        except:
-            print("  ⚠️  Timeout 90s, lanjut..."); time.sleep(5)
-        wait_ready(driver)
-        print("\n  📋  Input Controls ...")
-        fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
-        fill_date_v74(driver, "End Date",   1); time.sleep(0.8)
-        select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
-        so, eo = validate_dates_v74(driver)
-        if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
-        click_apply_dialog(driver)
-        wait_loading(driver)
-        time.sleep(3)
-        downloaded = export_xlsx(driver)
-        if downloaded:
-            exp  = save_to_export(downloaded, "MaterialTransactionSummary")
-            url  = save_to_gsheet(gc, downloaded, "MTS1", "MTS")
-            bot_footer(exp, url, "Data")
-        else:
-            print("\n  ⚠️  Download gagal")
-    except SystemExit as se: print(f"\n  🛑  {se}")
-    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+        print("  ⏳  Tunggu 30s...")
+        time.sleep(30)
+
+        print(f"  🌐  URL   : {driver.current_url}")
+        print(f"  📄  Title : {driver.title}")
+
+        driver.switch_to.default_content()
+
+        # Cek semua input di halaman
+        all_inputs = driver.find_elements(By.TAG_NAME, "input")
+        print(f"\n  📋  Semua INPUT ditemukan: {len(all_inputs)}")
+        for i, inp in enumerate(all_inputs[:10]):
+            print(f"    [{i}] type='{inp.get_attribute('type')}' "
+                  f"id='{inp.get_attribute('id')}' "
+                  f"class='{inp.get_attribute('class')}' "
+                  f"name='{inp.get_attribute('name')}'")
+
+        # Cek semua iframe
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        print(f"\n  🖼️  Semua IFRAME ditemukan: {len(iframes)}")
+        for i, iframe in enumerate(iframes):
+            print(f"    [{i}] id='{iframe.get_attribute('id')}' "
+                  f"src='{str(iframe.get_attribute('src'))[:80]}'")
+
+        # Masuk ke tiap iframe dan cek inputnya
+        for i, iframe in enumerate(iframes):
+            try:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(iframe)
+                inps = driver.find_elements(By.TAG_NAME, "input")
+                print(f"\n  🖼️  iframe[{i}] — INPUT: {len(inps)}")
+                for j, inp in enumerate(inps[:5]):
+                    print(f"    [{j}] type='{inp.get_attribute('type')}' "
+                          f"id='{inp.get_attribute('id')}' "
+                          f"class='{inp.get_attribute('class')}'")
+                # Cek dropdown
+                dropdowns = driver.find_elements(By.CSS_SELECTOR, ".jr-mSingleselect")
+                print(f"       jr-mSingleselect: {len(dropdowns)}")
+            except Exception as e:
+                print(f"  ⚠️  iframe[{i}] error: {e}")
+
+        driver.switch_to.default_content()
+
+    except Exception as e:
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+        
 # =============================================================================
 # CELL 3 — Monitor SJ Detail CO → tab "CO"
 # =============================================================================
