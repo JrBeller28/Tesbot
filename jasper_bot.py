@@ -374,12 +374,7 @@ def open_new_tab(driver):
 # =============================================================================
 # CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
 # =============================================================================
-BOT74_REPORT_URL = (
-    f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
-    "&ParentFolderUri=%2FiDempiere%2FInventory%2FStock"
-    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMaterial_Transaction_Summary_With_MR___Shipment_Internal__Raw_Data_"
-    "&standAlone=true"
-)
+BOT74_REPORT_URL = "https://report.tangki.id/jasperserver/flow.html?_flowId=viewReportFlow&ParentFolderUri=%2FiDempiere%2FInventory%2FStock&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMaterial_Transaction_Summary_With_MR___Shipment_Internal__Raw_Data_&standAlone=true"
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
 def fill_date_v74(driver, label, index):
