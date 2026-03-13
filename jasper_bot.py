@@ -432,7 +432,7 @@ def select_warehouse_group_v74(driver, item_text):
                 document.querySelectorAll('a,li,span,div').forEach(function(el){
                     if(el.textContent.trim()!==txt) return;
                     var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top<1080)
+                    if(r.width>0&&r.height>0&&r.top<2080)
                         res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
                 }); return res;""", item_text)
             print(f"    attempt {attempt+1}: {matches}")
@@ -461,12 +461,12 @@ def validate_dates_v74(driver):
     return so, eo
 
 def run_cell2(driver, gc):
-    print("\n" + "="*60)
+    print("\n" + "="*240)
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
-    print("="*60)
+    print("="*240)
     try:
         driver.get(BOT74_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(600)
+        print("  ⏳  60s tunggu load ..."); time.sleep(60)
         wait_ready(driver)
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
@@ -484,8 +484,7 @@ def run_cell2(driver, gc):
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
-    except SystemExit as se: print(f"\n  🛑  {se}")
-    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
 # CELL 3 — Monitor SJ Detail CO → tab "CO"
