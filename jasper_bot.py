@@ -382,42 +382,88 @@ BOT74_REPORT_URL = (
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
+def switch_to_controls_frame_v74(driver):
+    """
+    Cari frame yang mengandung input date & WarehouseGroup.
+    Return True jika berhasil switch, False jika tidak ditemukan.
+    """
+    driver.switch_to.default_content()
+
+    # Cek frame utama dulu
+    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+    if inps:
+        print("  🖼️  Controls ada di frame utama")
+        return True
+
+    # Cari di semua iframe
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    print(f"  🖼️  Cek {len(iframes)} iframe...")
+    for i, iframe in enumerate(iframes):
+        try:
+            driver.switch_to.default_content()
+            driver.switch_to.frame(iframe)
+            inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+            wg   = driver.find_elements(By.ID, "WarehouseGroup")
+            if inps or wg:
+                iid = iframe.get_attribute('id') or str(i)
+                print(f"  ✅  Controls ditemukan di iframe[{i}] id='{iid}'")
+                return True
+        except Exception as e:
+            print(f"  ⚠️  iframe[{i}] error: {e}")
+            driver.switch_to.default_content()
+
+    driver.switch_to.default_content()
+    print("  ❌  Controls tidak ditemukan di frame manapun!")
+    return False
+
 def wait_for_controls_v74(driver, timeout=90):
-    """Tunggu sampai input date & WarehouseGroup muncul, max timeout detik."""
-    print(f"  ⏳  Tunggu input controls muncul (max {timeout}s)...")
+    """Tunggu sampai input date muncul (cek frame utama + iframe), max timeout detik."""
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    try:
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input.date.hasDatepicker"))
-        )
-        time.sleep(3)  # jeda agar semua elemen fully rendered
+    print(f"  ⏳  Tunggu input controls muncul (max {timeout}s)...")
+
+    start = time.time()
+    while time.time() - start < timeout:
+        driver.switch_to.default_content()
+        # Cek frame utama
         inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-        print(f"  ✅  Controls muncul! ({len(inps)} input date ditemukan)")
-        return True
-    except Exception as e:
-        print(f"  ❌  Controls tidak muncul dalam {timeout}s: {e}")
-        return False
+        if inps:
+            print(f"  ✅  Controls muncul di frame utama! ({len(inps)} input date)")
+            time.sleep(2)
+            return True
+        # Cek iframe
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for i, iframe in enumerate(iframes):
+            try:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(iframe)
+                inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+                if inps:
+                    print(f"  ✅  Controls muncul di iframe[{i}]! ({len(inps)} input date)")
+                    driver.switch_to.default_content()
+                    time.sleep(2)
+                    return True
+            except:
+                pass
+        driver.switch_to.default_content()
+        time.sleep(2)
+
+    print(f"  ❌  Controls tidak muncul dalam {timeout}s!")
+    return False
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
-    driver.switch_to.default_content()
+
+    # Switch ke frame yang benar
+    if not switch_to_controls_frame_v74(driver):
+        print(f"  ❌  {label} GAGAL — frame tidak ditemukan!")
+        return False
+
     try:
         driver.execute_script(
             "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
-
-    # Tunggu input muncul jika belum ada
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    try:
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input.date.hasDatepicker"))
-        )
-    except:
-        print(f"  ❌  Input date tidak muncul dalam 30s!")
-        return False
 
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
     if index >= len(inps):
@@ -467,17 +513,10 @@ def fill_date_v74(driver, label, index):
 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
-    driver.switch_to.default_content()
 
-    # Tunggu WarehouseGroup muncul dulu
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    try:
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.ID, "WarehouseGroup"))
-        )
-    except:
-        print(f"  ❌  Elemen WarehouseGroup tidak muncul dalam 30s!")
+    # Switch ke frame yang benar
+    if not switch_to_controls_frame_v74(driver):
+        print(f"  ❌  Warehouse Group GAGAL — frame tidak ditemukan!")
         return False
 
     try:
@@ -529,7 +568,6 @@ def select_warehouse_group_v74(driver, item_text):
                 continue
 
             print(f"    ✔️  Elemen ditemukan, mencoba klik...")
-
             driver.execute_script("""
                 var el = arguments[0];
                 el.scrollIntoView({block:'center'});
@@ -559,7 +597,8 @@ def select_warehouse_group_v74(driver, item_text):
         return False
 
 def validate_dates_v74(driver):
-    driver.switch_to.default_content()
+    # Switch ke frame yang benar sebelum validasi
+    switch_to_controls_frame_v74(driver)
     result = driver.execute_script(r"""
         var d={sv:'',ev:''};
         var inps=document.querySelectorAll('input.date.hasDatepicker');
@@ -569,6 +608,7 @@ def validate_dates_v74(driver):
     sv, ev = result['sv'], result['ev']
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
+    driver.switch_to.default_content()
     return so, eo
 
 def run_cell2(driver, gc):
@@ -578,7 +618,7 @@ def run_cell2(driver, gc):
     try:
         driver.get(BOT74_REPORT_URL)
 
-        # ✅ Ganti sleep(25) dengan wait dinamis
+        # Tunggu dinamis + auto-detect iframe
         if not wait_for_controls_v74(driver, timeout=90):
             raise SystemExit("Halaman tidak load dalam 90 detik")
 
@@ -589,12 +629,13 @@ def run_cell2(driver, gc):
         select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
         so, eo = validate_dates_v74(driver)
         if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
+        driver.switch_to.default_content()
         click_apply_dialog(driver)
         wait_loading(driver)
         time.sleep(3)
         downloaded = export_xlsx(driver)
         if downloaded:
-            exp  = save_to_export(downloaded, "Material%20Transaction%20Summary%20With%20MR%20%26%20Shipment%20Internal%20(Raw%20Data)")
+            exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "MTS1", "MTS")
             bot_footer(exp, url, "Data")
         else:
