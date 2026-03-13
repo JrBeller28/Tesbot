@@ -377,10 +377,11 @@ def open_new_tab(driver):
 # =============================================================================
 BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
-    "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
+    report_name = "Material Transaction Summary With MR & Shipment Internal (Raw Data)"
+report_unit = f"/iDempiere/Inventory/Stock/{report_name}"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "FUL WHS FG"
+BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
