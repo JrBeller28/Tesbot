@@ -375,9 +375,6 @@ def open_new_tab(driver):
 # =============================================================================
 # CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
 # =============================================================================
-# =============================================================================
-# CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
-# =============================================================================
 BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
     "&reportUnit=/iDempiere/Inventory/Stock/Material%20Transaction%20Summary%20With%20MR%20%26%20Shipment%20Internal%20(Raw%20Data)"
