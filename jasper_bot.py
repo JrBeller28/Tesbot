@@ -371,7 +371,6 @@ def bot_footer(export_path, gsheet_url, tab):
 def open_new_tab(driver):
     driver.execute_script("window.open('about:blank', '_blank');")
     driver.switch_to.window(driver.window_handles[-1])
-
 # =============================================================================
 # CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
 # =============================================================================
