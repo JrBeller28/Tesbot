@@ -434,67 +434,72 @@ def select_warehouse_group_v74(driver, item_text):
         do_click(driver, toggle, tr['x'], tr['y'])
         time.sleep(2.5)
 
-        # 3. Coba klik item (max 2 percobaan)
-        for attempt in range(2):
+        # 3. Coba klik item (max 3 percobaan)
+        for attempt in range(3):
             print(f"    attempt {attempt+1}: mencari '{item_text}'...")
 
-            # Cari elemen spesifik di dalam list dropdown
-            matches_els = driver.execute_script("""
-                var res=[], txt=arguments[0];
+            # Cari elemen dengan text exact match
+            match_el = driver.execute_script("""
+                var txt = arguments[0];
+                var found = null;
                 var selectors = [
-                    'ul li a', 'ul li span', 'ul li',
+                    '.jr-mSingleselect-list li a',
+                    '.jr-mSingleselect-list li span',
                     '.jr-mSingleselect-list li',
-                    '.jr-mSingleselect-list a'
+                    'ul li a', 'ul li span', 'ul li'
                 ];
-                selectors.forEach(function(sel){
-                    document.querySelectorAll(sel).forEach(function(el){
-                        if(el.textContent.trim()!==txt) return;
-                        var r=el.getBoundingClientRect();
-                        if(r.width>0 && r.height>0 && r.top<1080)
-                            res.push(el);
-                    });
-                });
-                // Deduplicate
-                return res.filter(function(el, i, arr){
-                    return arr.indexOf(el)===i;
-                });
+                for (var s=0; s<selectors.length; s++) {
+                    var els = document.querySelectorAll(selectors[s]);
+                    for (var i=0; i<els.length; i++) {
+                        var el = els[i];
+                        if (el.textContent.trim() !== txt) continue;
+                        var r = el.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0 && r.top > 0 && r.top < 1080) {
+                            found = el;
+                            break;
+                        }
+                    }
+                    if (found) break;
+                }
+                return found;
             """, item_text)
 
-            print(f"    attempt {attempt+1}: ditemukan {len(matches_els)} elemen")
-
-            if not matches_els:
-                print(f"    ⚠️  Tidak ditemukan, tunggu sebentar...")
+            if not match_el:
+                print(f"    ⚠️  Elemen tidak ditemukan, tunggu...")
                 time.sleep(1)
                 continue
 
-            # Klik langsung ke elemen pertama via JS (lebih akurat dari koordinat)
-            try:
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", matches_els[0])
-                time.sleep(0.3)
-                driver.execute_script("arguments[0].click();", matches_els[0])
-                time.sleep(1.2)
-            except Exception as e:
-                print(f"    ⚠️  JS click gagal: {e}, coba ActionChains...")
-                try:
-                    ActionChains(driver).move_to_element(matches_els[0]).click().perform()
-                    time.sleep(1.2)
-                except Exception as e2:
-                    print(f"    ⚠️  ActionChains gagal: {e2}")
-                    continue
+            print(f"    ✔️  Elemen ditemukan, mencoba klik...")
 
-            # 4. Verifikasi apakah nilai dropdown sudah berubah
+            # Dispatch full mouse event sequence (paling kompatibel dengan semua framework)
+            driver.execute_script("""
+                var el = arguments[0];
+                el.scrollIntoView({block:'center'});
+                ['mouseover','mouseenter','mousemove','mousedown','mouseup','click'].forEach(function(evtName) {
+                    var evt = new MouseEvent(evtName, {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window
+                    });
+                    el.dispatchEvent(evt);
+                });
+            """, match_el)
+            time.sleep(1.5)
+
+            # Verifikasi
             val = driver.execute_script("""
-                var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
+                var s = document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
                 return s ? s.textContent.trim() : '---';
             """)
 
             if val and val not in ('---', ''):
                 print(f"  ✅  Warehouse Group terpilih: '{val}'")
                 return True
-            else:
-                print(f"    ⚠️  Nilai belum berubah setelah klik, coba lagi...")
 
-        print(f"  ❌  Gagal memilih '{item_text}' setelah 2 percobaan")
+            print(f"    ⚠️  Nilai belum berubah, coba lagi...")
+            time.sleep(0.5)
+
+        print(f"  ❌  Gagal memilih '{item_text}' setelah 3 percobaan")
         return False
 
     except Exception as e:
