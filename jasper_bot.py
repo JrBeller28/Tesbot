@@ -887,16 +887,11 @@ def run_cell5(driver, gc):
             (By.XPATH, "//span[normalize-space(text())='Transaction Detail']")))
         driver.execute_script("arguments[0].click();", menu_item); time.sleep(8)
 
-        # 3. ISI FORM
-        print("  📝  Mengisi form ...")
-        fill_text_field_erp(driver, c5_wait, "Organization", "")
-        fill_text_field_erp(driver, c5_wait, "Warehouse", "")
-
-        # 4. PILIH TANGGAL
+        # 3. PILIH TANGGAL
         select_date_erp(driver, "Movement Date", 1)
         select_date_erp(driver, "Movement Date", 2)
 
-        # 5. KLIK OK
+        # 4. KLIK OK
         print("  🚀  Klik tombol OK ...")
         ok_xpath = (
             "//button[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK') "
