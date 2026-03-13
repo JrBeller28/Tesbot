@@ -380,7 +380,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "FUL WHS FG"
+BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -433,7 +433,7 @@ def select_warehouse_group_v74(driver, item_text):
                 document.querySelectorAll('a,li,span,div').forEach(function(el){
                     if(el.textContent.trim()!==txt) return;
                     var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top<1080)
+                    if(r.width>0&&r.height>0&&r.top<3000)
                         res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
                 }); return res;""", item_text)
             print(f"    attempt {attempt+1}: {matches}")
@@ -481,7 +481,7 @@ def run_cell2(driver, gc):
         downloaded = export_xlsx(driver)
         if downloaded:
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
-            url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
+            url  = save_to_gsheet(gc, downloaded, "MTS1", "MTS")
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
