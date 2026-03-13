@@ -379,7 +379,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
+BOT74_WAREHOUSE_GROUP = "SC wh"
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
