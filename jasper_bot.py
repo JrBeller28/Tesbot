@@ -375,37 +375,94 @@ def open_new_tab(driver):
 # =============================================================================
 # CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
 # =============================================================================
+# =============================================================================
+# CELL 2 — Material Transaction Summary With MR & Shipment Internal (Raw Data)
+# =============================================================================
 BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
-      "&ParentFolderUri=%2FiDempiere%2FInventory%2FStock"
-    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMaterial_Transaction_Summary_With_MR_&_Shipment_Internal_(Raw_Data)"
+    "&reportUnit=/iDempiere/Inventory/Stock/Material%20Transaction%20Summary%20With%20MR%20%26%20Shipment%20Internal%20(Raw%20Data)"
     "&standAlone=true"
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
+# -----------------------------------------------------------------------------
+def switch_to_controls_frame_v74(driver):
+    """Auto-detect frame yang mengandung input date."""
+    driver.switch_to.default_content()
+    if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker"):
+        return True
+    for i, iframe in enumerate(driver.find_elements(By.TAG_NAME, "iframe")):
+        try:
+            driver.switch_to.default_content()
+            driver.switch_to.frame(iframe)
+            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker") or \
+               driver.find_elements(By.CSS_SELECTOR, ".jr-mSingleselect"):
+                print(f"  🖼️  Controls ditemukan di iframe[{i}]")
+                return True
+        except: pass
+    driver.switch_to.default_content()
+    return False
+
+def wait_for_controls_v74(driver, timeout=90):
+    """Tunggu controls muncul, cek frame utama + semua iframe."""
+    print(f"  ⏳  Tunggu input controls muncul (max {timeout}s)...")
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            driver.switch_to.default_content()
+            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker"):
+                inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+                print(f"  ✅  Controls muncul di frame utama! ({len(inps)} input date)")
+                time.sleep(2); return True
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            print(f"  🖼️  Cek {len(iframes)} iframe... | title: {driver.title[:40]}")
+            for i, iframe in enumerate(iframes):
+                try:
+                    driver.switch_to.default_content()
+                    driver.switch_to.frame(iframe)
+                    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+                    if inps:
+                        print(f"  ✅  Controls muncul di iframe[{i}]! ({len(inps)} input)")
+                        driver.switch_to.default_content()
+                        time.sleep(2); return True
+                except: pass
+            driver.switch_to.default_content()
+        except Exception as e:
+            print(f"  ⚠️  Loop error: {e}")
+        time.sleep(5)
+    print(f"  ❌  Controls tidak muncul dalam {timeout}s!")
+    return False
+
+# -----------------------------------------------------------------------------
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
-    driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    if not switch_to_controls_frame_v74(driver):
+        print(f"  ❌  {label} GAGAL — frame tidak ditemukan!"); return False
+    try:
+        driver.execute_script(
+            "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index >= len(inps): print(f"  ❌  index {index} tidak ada!"); return False
+    if index >= len(inps):
+        print(f"  ❌  index {index} tidak ada! (total: {len(inps)})"); return False
     inp = inps[index]
     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
+    # Strategi 1 — Keyboard
     try:
         ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
-        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
-        inp.send_keys(TODAY_STR);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);        time.sleep(0.5)
+        inp.send_keys(Keys.CONTROL + "a"); time.sleep(0.1)
+        inp.send_keys(Keys.DELETE);        time.sleep(0.1)
+        inp.send_keys(TODAY_STR);          time.sleep(0.3)
+        inp.send_keys(Keys.TAB);           time.sleep(0.5)
         val = inp.get_attribute('value')
-        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
+        if val and val.strip():
+            trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
     except Exception as e: print(f"  ⚠️  S1: {e}")
+    # Strategi 2 — JavaScript
     try:
         driver.execute_script("""
-            var el=arguments[0],v=arguments[1];
+            var el=arguments[0], v=arguments[1];
             var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
             s.call(el,v); el.value=v;
             ['focus','input','change','blur'].forEach(function(e){
@@ -417,17 +474,35 @@ def fill_date_v74(driver, label, index):
     except Exception as e: print(f"  ⚠️  S2: {e}")
     print(f"  ❌  {label} GAGAL!"); return False
 
+# -----------------------------------------------------------------------------
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
-    driver.switch_to.default_content()
+    if not switch_to_controls_frame_v74(driver):
+        print(f"  ❌  Frame tidak ditemukan!"); return False
     try:
-        # 1. Scroll ke elemen dropdown
-        wg = driver.find_element(By.ID, "WarehouseGroup")
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg)
-        time.sleep(0.8)
+        # Cari dropdown secara dinamis — tidak hardcode ID
+        toggle = driver.execute_script("""
+            var toggles = document.querySelectorAll('a.jr-mSingleselect-input');
+            for (var i=0; i<toggles.length; i++) {
+                var r = toggles[i].getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) return toggles[i];
+            }
+            return null;
+        """)
 
-        # 2. Klik toggle untuk buka dropdown
-        toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
+        if not toggle:
+            print(f"  ❌  Dropdown toggle tidak ditemukan!")
+            return False
+
+        # Cek ID dropdown yang ditemukan untuk log
+        dropdown_id = driver.execute_script(
+            "return arguments[0].closest('[id]') ? arguments[0].closest('[id]').id : 'unknown';",
+            toggle)
+        print(f"  🔍  Dropdown ditemukan, ID parent: '{dropdown_id}'")
+
+        # Scroll & klik toggle
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
+        time.sleep(0.8)
         tr = driver.execute_script("""
             var r=arguments[0].getBoundingClientRect();
             return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};
@@ -435,80 +510,65 @@ def select_warehouse_group_v74(driver, item_text):
         do_click(driver, toggle, tr['x'], tr['y'])
         time.sleep(2.5)
 
-        # 3. Coba klik item (max 3 percobaan)
+        # Cari & klik item (max 3 percobaan)
         for attempt in range(3):
             print(f"    attempt {attempt+1}: mencari '{item_text}'...")
-
-            # Cari elemen dengan text exact match
             match_el = driver.execute_script("""
-                var txt = arguments[0];
-                var found = null;
-                var selectors = [
+                var txt=arguments[0], found=null;
+                var selectors=[
                     '.jr-mSingleselect-list li a',
                     '.jr-mSingleselect-list li span',
                     '.jr-mSingleselect-list li',
-                    'ul li a', 'ul li span', 'ul li'
+                    'ul li a','ul li span','ul li'
                 ];
-                for (var s=0; s<selectors.length; s++) {
-                    var els = document.querySelectorAll(selectors[s]);
-                    for (var i=0; i<els.length; i++) {
-                        var el = els[i];
-                        if (el.textContent.trim() !== txt) continue;
-                        var r = el.getBoundingClientRect();
-                        if (r.width > 0 && r.height > 0 && r.top > 0 && r.top < 1080) {
-                            found = el;
-                            break;
-                        }
+                for(var s=0;s<selectors.length;s++){
+                    var els=document.querySelectorAll(selectors[s]);
+                    for(var i=0;i<els.length;i++){
+                        var el=els[i];
+                        if(el.textContent.trim()!==txt) continue;
+                        var r=el.getBoundingClientRect();
+                        if(r.width>0&&r.height>0&&r.top>0&&r.top<1080){found=el;break;}
                     }
-                    if (found) break;
+                    if(found) break;
                 }
                 return found;
             """, item_text)
 
             if not match_el:
-                print(f"    ⚠️  Elemen tidak ditemukan, tunggu...")
-                time.sleep(1)
-                continue
+                print(f"    ⚠️  Elemen tidak ditemukan, tunggu..."); time.sleep(1); continue
 
             print(f"    ✔️  Elemen ditemukan, mencoba klik...")
-
-            # Dispatch full mouse event sequence (paling kompatibel dengan semua framework)
             driver.execute_script("""
-                var el = arguments[0];
+                var el=arguments[0];
                 el.scrollIntoView({block:'center'});
-                ['mouseover','mouseenter','mousemove','mousedown','mouseup','click'].forEach(function(evtName) {
-                    var evt = new MouseEvent(evtName, {
-                        bubbles: true,
-                        cancelable: true,
-                        view: window
-                    });
-                    el.dispatchEvent(evt);
+                ['mouseover','mouseenter','mousemove','mousedown','mouseup','click'].forEach(function(n){
+                    el.dispatchEvent(new MouseEvent(n,{bubbles:true,cancelable:true,view:window}));
                 });
             """, match_el)
             time.sleep(1.5)
 
-            # Verifikasi
+            # Verifikasi — cek semua selection span, bukan hardcode ID
             val = driver.execute_script("""
-                var s = document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
-                return s ? s.textContent.trim() : '---';
+                var spans = document.querySelectorAll('.jr-mSingleselect-input-selection');
+                for (var i=0; i<spans.length; i++) {
+                    var t = spans[i].textContent.trim();
+                    if (t && t !== '---') return t;
+                }
+                return '---';
             """)
 
             if val and val not in ('---', ''):
-                print(f"  ✅  Warehouse Group terpilih: '{val}'")
-                return True
+                print(f"  ✅  Warehouse Group terpilih: '{val}'"); return True
 
-            print(f"    ⚠️  Nilai belum berubah, coba lagi...")
-            time.sleep(0.5)
+            print(f"    ⚠️  Nilai belum berubah, coba lagi..."); time.sleep(0.5)
 
-        print(f"  ❌  Gagal memilih '{item_text}' setelah 3 percobaan")
-        return False
-
+        print(f"  ❌  Gagal memilih '{item_text}' setelah 3 percobaan"); return False
     except Exception as e:
-        print(f"  ❌  Error: {e}")
-        return False
+        print(f"  ❌  Error: {e}"); return False
 
+# -----------------------------------------------------------------------------
 def validate_dates_v74(driver):
-    driver.switch_to.default_content()
+    switch_to_controls_frame_v74(driver)
     result = driver.execute_script(r"""
         var d={sv:'',ev:''};
         var inps=document.querySelectorAll('input.date.hasDatepicker');
@@ -518,15 +578,20 @@ def validate_dates_v74(driver):
     sv, ev = result['sv'], result['ev']
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
+    driver.switch_to.default_content()
     return so, eo
 
+# -----------------------------------------------------------------------------
 def run_cell2(driver, gc):
     print("\n" + "="*60)
-    print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
+    print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary With MR & Shipment Internal (Raw Data)")
     print("="*60)
     try:
         driver.get(BOT74_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        print(f"  🌐  URL: {driver.current_url[:100]}")
+        time.sleep(5)
+        if not wait_for_controls_v74(driver, timeout=90):
+            raise SystemExit("Halaman tidak load dalam 90 detik")
         wait_ready(driver)
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
@@ -534,13 +599,14 @@ def run_cell2(driver, gc):
         select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
         so, eo = validate_dates_v74(driver)
         if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
+        driver.switch_to.default_content()
         click_apply_dialog(driver)
         wait_loading(driver)
         time.sleep(3)
         downloaded = export_xlsx(driver)
         if downloaded:
-            exp  = save_to_export(downloaded, "MaterialTransactionSummary")
-            url  = save_to_gsheet(gc, downloaded, "MTS1", "MTS")
+            exp = save_to_export(downloaded, "MaterialTransactionSummary")
+            url = save_to_gsheet(gc, downloaded, "MTS1", "MTS")
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
