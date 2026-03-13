@@ -371,15 +371,16 @@ def bot_footer(export_path, gsheet_url, tab):
 def open_new_tab(driver):
     driver.execute_script("window.open('about:blank', '_blank');")
     driver.switch_to.window(driver.window_handles[-1])
+
 # =============================================================================
-# CELL 2 — Material Transaction Summary 
+# CELL 2 — Material Transaction Summary → tab "Data"
 # =============================================================================
 BOT74_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
+BOT74_WAREHOUSE_GROUP = ""
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -432,7 +433,7 @@ def select_warehouse_group_v74(driver, item_text):
                 document.querySelectorAll('a,li,span,div').forEach(function(el){
                     if(el.textContent.trim()!==txt) return;
                     var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top<2080)
+                    if(r.width>0&&r.height>0&&r.top<1080)
                         res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
                 }); return res;""", item_text)
             print(f"    attempt {attempt+1}: {matches}")
@@ -466,7 +467,7 @@ def run_cell2(driver, gc):
     print("="*60)
     try:
         driver.get(BOT74_REPORT_URL)
-        print("  ⏳  20s tunggu load ..."); time.sleep(20)
+        print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
@@ -484,7 +485,8 @@ def run_cell2(driver, gc):
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
-    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+    except SystemExit as se: print(f"\n  🛑  {se}")
+    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
 # CELL 3 — Monitor SJ Detail CO → tab "CO"
