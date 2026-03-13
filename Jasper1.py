@@ -24,10 +24,10 @@ import openpyxl, xlrd
 # =============================================================================
 # KONFIGURASI
 # =============================================================================
-USERNAME     = "agus.widodo"
-PASSWORD     = "kampret99"
+USERNAME     = "muhammad.prasetyo"
+PASSWORD     = "Adminhqacc12"
 BASE_URL     = "http://report.tangki.id/jasperserver"
-GSHEET_ID    = "1DPIh2FZBAFXCaj_AbsXiMR1qSBmt4QXcp4kQ8iZXTGg"
+GSHEET_ID    = "1BTAVmWs-9GZpJcO2Kv2zEtV2jy680wHASboIeArqb9U"
 WIB          = timezone(timedelta(hours=7))
 TODAY_STR    = datetime.now(WIB).strftime("%Y-%m-%d")
 TODAY_LABEL  = datetime.now(WIB).strftime("%Y%m%d")
@@ -40,8 +40,8 @@ C5_SEARCH_DIRS  = [C5_DOWNLOAD_DIR, "/tmp"]
 EXTENSIONS      = ["*.xls", "*.xlsx", "*.XLS", "*.XLSX"]
 
 ERP_URL  = "https://erp.tangki.id/webui/index.zul"
-ERP_USER = "damar.kismanto"
-ERP_PASS = "penguin777"
+ERP_USER = "muhammad.prasetyo"
+ERP_PASS = "Adminhqacc12"
 
 for d in [DOWNLOAD_DIR, C5_DOWNLOAD_DIR, FOLDER_OUT]:
     os.makedirs(d, exist_ok=True)
@@ -380,7 +380,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "FUL WHS FG"
+BOT74_WAREHOUSE_GROUP = ""
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -889,8 +889,8 @@ def run_cell5(driver, gc):
 
         # 3. ISI FORM
         print("  📝  Mengisi form ...")
-        fill_text_field_erp(driver, c5_wait, "Organization", "TRA")
-        fill_text_field_erp(driver, c5_wait, "Warehouse", "TRA-JKT")
+        fill_text_field_erp(driver, c5_wait, "Organization", "")
+        fill_text_field_erp(driver, c5_wait, "Warehouse", "")
 
         # 4. PILIH TANGGAL
         select_date_erp(driver, "Movement Date", 1)
