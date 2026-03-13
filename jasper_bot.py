@@ -420,33 +420,86 @@ def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
+        # 1. Scroll ke elemen dropdown
         wg = driver.find_element(By.ID, "WarehouseGroup")
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg)
+        time.sleep(0.8)
+
+        # 2. Klik toggle untuk buka dropdown
         toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
         tr = driver.execute_script("""
             var r=arguments[0].getBoundingClientRect();
-            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
-        do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
+            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};
+        """, toggle)
+        do_click(driver, toggle, tr['x'], tr['y'])
+        time.sleep(2.5)
+
+        # 3. Coba klik item (max 2 percobaan)
         for attempt in range(2):
-            matches = driver.execute_script("""
-                var res=[],txt=arguments[0];
-                document.querySelectorAll('a,li,span,div').forEach(function(el){
-                    if(el.textContent.trim()!==txt) return;
-                    var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top<3000)
-                        res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
-                }); return res;""", item_text)
-            print(f"    attempt {attempt+1}: {matches}")
-            if not matches: time.sleep(1); continue
-            ix, iy = matches[0]['cx'], matches[0]['cy']
-            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
-            do_click(driver, el, ix, iy); time.sleep(1.2)
+            print(f"    attempt {attempt+1}: mencari '{item_text}'...")
+
+            # Cari elemen spesifik di dalam list dropdown
+            matches_els = driver.execute_script("""
+                var res=[], txt=arguments[0];
+                var selectors = [
+                    'ul li a', 'ul li span', 'ul li',
+                    '.jr-mSingleselect-list li',
+                    '.jr-mSingleselect-list a'
+                ];
+                selectors.forEach(function(sel){
+                    document.querySelectorAll(sel).forEach(function(el){
+                        if(el.textContent.trim()!==txt) return;
+                        var r=el.getBoundingClientRect();
+                        if(r.width>0 && r.height>0 && r.top<1080)
+                            res.push(el);
+                    });
+                });
+                // Deduplicate
+                return res.filter(function(el, i, arr){
+                    return arr.indexOf(el)===i;
+                });
+            """, item_text)
+
+            print(f"    attempt {attempt+1}: ditemukan {len(matches_els)} elemen")
+
+            if not matches_els:
+                print(f"    ⚠️  Tidak ditemukan, tunggu sebentar...")
+                time.sleep(1)
+                continue
+
+            # Klik langsung ke elemen pertama via JS (lebih akurat dari koordinat)
+            try:
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", matches_els[0])
+                time.sleep(0.3)
+                driver.execute_script("arguments[0].click();", matches_els[0])
+                time.sleep(1.2)
+            except Exception as e:
+                print(f"    ⚠️  JS click gagal: {e}, coba ActionChains...")
+                try:
+                    ActionChains(driver).move_to_element(matches_els[0]).click().perform()
+                    time.sleep(1.2)
+                except Exception as e2:
+                    print(f"    ⚠️  ActionChains gagal: {e2}")
+                    continue
+
+            # 4. Verifikasi apakah nilai dropdown sudah berubah
             val = driver.execute_script("""
                 var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
-                return s?s.textContent.trim():'---';""")
-            if val not in ('---', ''): print(f"  ✅  '{val}'"); return True
+                return s ? s.textContent.trim() : '---';
+            """)
+
+            if val and val not in ('---', ''):
+                print(f"  ✅  Warehouse Group terpilih: '{val}'")
+                return True
+            else:
+                print(f"    ⚠️  Nilai belum berubah setelah klik, coba lagi...")
+
+        print(f"  ❌  Gagal memilih '{item_text}' setelah 2 percobaan")
         return False
-    except Exception as e: print(f"  ❌  {e}"); return False
+
+    except Exception as e:
+        print(f"  ❌  Error: {e}")
+        return False
 
 def validate_dates_v74(driver):
     driver.switch_to.default_content()
