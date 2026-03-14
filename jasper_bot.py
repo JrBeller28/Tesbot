@@ -420,116 +420,33 @@ def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
-        # Ambil SEMUA visible toggles dulu untuk debug
-        all_toggles = driver.execute_script("""
-            var res = [];
-            document.querySelectorAll('a.jr-mSingleselect-input').forEach(function(t) {
-                var r = t.getBoundingClientRect();
-                var p = t.closest('[id]');
-                res.push({
-                    visible: r.width > 0 && r.height > 0,
-                    parentId: p ? p.id : 'unknown',
-                    x: Math.round(r.left), y: Math.round(r.top),
-                    w: Math.round(r.width), h: Math.round(r.height)
-                });
-            });
-            return res;
-        """)
-        print(f"  📋  Semua toggles: {all_toggles}")
-
-        # Ambil VISIBLE toggle — skip index 0 (Organization), ambil index 1
-        toggle = driver.execute_script("""
-            var visible = [];
-            document.querySelectorAll('a.jr-mSingleselect-input').forEach(function(t) {
-                var r = t.getBoundingClientRect();
-                if (r.width > 0 && r.height > 0) visible.push(t);
-            });
-            // index 0 = Organization, index 1 = Warehouse Group
-            return visible.length > 1 ? visible[1] : null;
-        """)
-
-        if not toggle:
-            print("  ❌  Toggle Warehouse Group tidak ditemukan (butuh minimal 2 dropdown)!")
-            return False
-
-        parent_id = driver.execute_script(
-            "var p=arguments[0].closest('[id]'); return p ? p.id : 'unknown';", toggle)
-        print(f"  🔍  Toggle dipilih, parent ID: '{parent_id}'")
-
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
-        time.sleep(0.8)
-
-        # Klik toggle dengan koordinat
+        wg = driver.find_element(By.ID, "WarehouseGroup")
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
+        toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
         tr = driver.execute_script("""
             var r=arguments[0].getBoundingClientRect();
-            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};
-        """, toggle)
-        do_click(driver, toggle, tr['x'], tr['y'])
-        time.sleep(2.5)
-
-        for attempt in range(3):
-            print(f"    attempt {attempt+1}: mencari '{item_text}'...")
-
-            match_el = driver.execute_script("""
-                var txt=arguments[0], found=null;
-                var selectors=[
-                    '.jr-mSingleselect-list li a',
-                    '.jr-mSingleselect-list li span',
-                    '.jr-mSingleselect-list li',
-                    'ul li a','ul li span','ul li'
-                ];
-                for(var s=0;s<selectors.length;s++){
-                    var els=document.querySelectorAll(selectors[s]);
-                    for(var i=0;i<els.length;i++){
-                        var el=els[i];
-                        if(el.textContent.trim()!==txt) continue;
-                        var r=el.getBoundingClientRect();
-                        if(r.width>0&&r.height>0&&r.top>0&&r.top<1080){found=el;break;}
-                    }
-                    if(found) break;
-                }
-                return found;
-            """, item_text)
-
-            if not match_el:
-                items = driver.execute_script("""
-                    var res=[];
-                    document.querySelectorAll(
-                        '.jr-mSingleselect-list li, ul.jr-mSelectlist li'
-                    ).forEach(function(el){
-                        if(el.offsetParent) res.push(el.textContent.trim());
-                    });
-                    return res.slice(0,10);
-                """)
-                print(f"    📋  Items tersedia: {items}")
-                time.sleep(1); continue
-
-            print(f"    ✔️  Elemen ditemukan, klik...")
-            driver.execute_script("""
-                var el=arguments[0];
-                el.scrollIntoView({block:'center'});
-                ['mouseover','mouseenter','mousemove','mousedown','mouseup','click'].forEach(function(n){
-                    el.dispatchEvent(new MouseEvent(n,{bubbles:true,cancelable:true,view:window}));
-                });
-            """, match_el)
-            time.sleep(1.5)
-
+            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
+        do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
+        for attempt in range(2):
+            matches = driver.execute_script("""
+                var res=[],txt=arguments[0];
+                document.querySelectorAll('a,li,span,div').forEach(function(el){
+                    if(el.textContent.trim()!==txt) return;
+                    var r=el.getBoundingClientRect();
+                    if(r.width>0&&r.height>0&&r.top<1080)
+                        res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
+                }); return res;""", item_text)
+            print(f"    attempt {attempt+1}: {matches}")
+            if not matches: time.sleep(1); continue
+            ix, iy = matches[0]['cx'], matches[0]['cy']
+            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
+            do_click(driver, el, ix, iy); time.sleep(1.2)
             val = driver.execute_script("""
-                var spans=document.querySelectorAll('.jr-mSingleselect-input-selection');
-                for(var i=0;i<spans.length;i++){
-                    var t=spans[i].textContent.trim();
-                    if(t && t!=='---') return t;
-                }
-                return '---';
-            """)
-            if val and val not in ('---', ''):
-                print(f"  ✅  Warehouse Group terpilih: '{val}'"); return True
-
-            print(f"    ⚠️  Nilai belum berubah, coba lagi..."); time.sleep(0.5)
-
-        print(f"  ❌  Gagal memilih '{item_text}' setelah 3 percobaan"); return False
-    except Exception as e:
-        print(f"  ❌  Error: {e}"); return False
+                var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
+                return s?s.textContent.trim():'---';""")
+            if val not in ('---', ''): print(f"  ✅  '{val}'"); return True
+        return False
+    except Exception as e: print(f"  ❌  {e}"); return False
 
 def validate_dates_v74(driver):
     driver.switch_to.default_content()
@@ -550,18 +467,7 @@ def run_cell2(driver, gc):
     print("="*60)
     try:
         driver.get(BOT74_REPORT_URL)
-        # Tunggu dinamis ganti sleep(25)
-        print("  ⏳  Tunggu halaman load (max 90s)...")
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        try:
-            WebDriverWait(driver, 90).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input.date.hasDatepicker"))
-            )
-            time.sleep(3)
-            print("  ✅  Halaman siap!")
-        except:
-            print("  ⚠️  Timeout 90s, lanjut..."); time.sleep(5)
+        print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
         print("\n  📋  Input Controls ...")
         fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
@@ -575,7 +481,7 @@ def run_cell2(driver, gc):
         downloaded = export_xlsx(driver)
         if downloaded:
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
-            url  = save_to_gsheet(gc, downloaded, "MTS1", "MTS")
+            url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
