@@ -489,180 +489,120 @@ def run_cell2(driver, gc):
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
-# CELL 3 — Monitor SJ Detail CO → tab "CO"
+# CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
 # =============================================================================
-BOT75CO_REPORT_URL = (
+BOT75IM_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
-    "&ParentFolderUri=%2FiDempiere%2FInventory%2FStock"
-    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMonitor_Status_Surat_Jalan_Detail_Rev2"
+    "&ParentFolderUri=%2FiDempiere%2FLogistik%2FMonitorTrx%2FInventory_Move"
+    "&reportUnit=%2FiDempiere%2FLogistik%2FMonitorTrx%2FInventory_Move%2FMonitor_Status_Inventory_Move_In_Progress__Real_Time_"
     "&standAlone=true"
 )
 
-def fill_date_dialog(driver, label, index):
-    print(f"  📅  {label} → '{TODAY_STR}'")
-    driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
-    except: pass
-    time.sleep(0.3)
-    inp = None
-    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index < len(inps): inp = inps[index]
-    if not inp:
-        try:
-            all_inps = driver.find_elements(By.CSS_SELECTOR,
-                ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
-            if index < len(all_inps): inp = all_inps[index]
-        except: pass
-    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
-    try:
-        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
-        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
-        inp.send_keys(TODAY_STR);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);        time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S1: {e}")
-    try:
-        driver.execute_script("""
-            var el=arguments[0],v=arguments[1];
-            var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-            s.call(el,v); el.value=v;
-            ['focus','input','change','blur'].forEach(function(e){
-                el.dispatchEvent(new Event(e,{bubbles:true}));});
-            el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, TODAY_STR); time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S2: {e}")
-    print(f"  ❌  {label} GAGAL!"); return False
-
-def select_branch_locator(driver, search_text="01"):
-    print(f"  🏢  Branch Locator: ketik '{search_text}', pilih teratas")
+def select_dropdown_by_text(driver, toggle_index, target_text):
+    """Pilih dropdown ke-N (dari visible toggles) dengan teks target."""
+    print(f"  🔽  Dropdown [{toggle_index}] → '{target_text}'")
     driver.switch_to.default_content()
     try:
         toggles = driver.find_elements(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
         visible  = [t for t in toggles if t.is_displayed()]
-        if len(visible) < 2: print("  ❌  Toggle branch tidak ada"); return False
-        branch_toggle = visible[1]
-    except Exception as e: print(f"  ❌  {e}"); return False
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", branch_toggle); time.sleep(0.5)
-    tr = driver.execute_script("""
-        var r=arguments[0].getBoundingClientRect();
-        return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", branch_toggle)
-    do_click(driver, branch_toggle, tr['x'], tr['y']); time.sleep(2.5)
-    search_typed = False
-    for sel in ["input.jr-mSingleselect-search", "input[placeholder*='Search']",
-                "input[class*='search']", ".jr-mSingleselect-dropdown input"]:
-        try:
-            els = driver.find_elements(By.CSS_SELECTOR, sel)
-            for el in els:
-                if el.is_displayed():
-                    el.clear(); time.sleep(0.2); el.send_keys(search_text); time.sleep(1.5)
-                    print(f"  → Ketik '{search_text}'"); search_typed = True; break
-            if search_typed: break
-        except: continue
-    for attempt in range(2):
-        matches = driver.execute_script("""
-            var res=[], SKIP=['---','','–','-','*'];
-            document.querySelectorAll('.jr-mSingleselect-listbox *, .jr-mSingleselect-dropdown *')
-            .forEach(function(el){
-                if(!el.offsetParent) return;
-                var t=el.textContent.trim();
-                if(!t||SKIP.indexOf(t)>-1||t.length>100) return;
-                var r=el.getBoundingClientRect();
-                if(r.width>5&&r.height>5)
-                    res.push({text:t,cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
-            }); return res;""", search_text)
-        valid = [m for m in matches if len(m['text']) > 1 and
-                 not re.match(r'^[\*\-–\s]+$', m['text'])]
-        prio  = [m for m in valid if m['text'].startswith(search_text)] or valid
-        if prio:
-            first = prio[0]; ix, iy = first['cx'], first['cy']
-            print(f"  → Klik: '{first['text']}' ({ix},{iy})")
-            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
-            if el: do_click(driver, el, ix, iy); time.sleep(1.2)
-            closed = driver.execute_script("""
-                var d=document.querySelectorAll('.jr-mSingleselect-listbox,.jr-mSingleselect-dropdown');
-                for(var i=0;i<d.length;i++) if(d[i].offsetParent) return false;
-                return true;""")
-            if closed: print("  ✅  Branch dipilih"); return True
-        if attempt == 0: time.sleep(1)
-    print("  ⚠️  Branch: tidak bisa konfirmasi, lanjut ..."); return True
+        if toggle_index >= len(visible):
+            print(f"  ❌  Toggle index {toggle_index} tidak ada (total: {len(visible)})")
+            return False
+        toggle = visible[toggle_index]
+    except Exception as e:
+        print(f"  ❌  {e}"); return False
 
-def select_shipment_status(driver, target="CO"):
-    print(f"  📋  Shipment Status: '{target}'")
-    driver.switch_to.default_content()
-    try:
-        toggles = driver.find_elements(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
-        visible  = [t for t in toggles if t.is_displayed()]
-        ship_toggle = visible[3] if len(visible) > 3 else visible[-1]
-    except Exception as e: print(f"  ❌  {e}"); return False
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", ship_toggle); time.sleep(0.5)
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
+    time.sleep(0.5)
     tr = driver.execute_script("""
         var r=arguments[0].getBoundingClientRect();
-        return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", ship_toggle)
-    do_click(driver, ship_toggle, tr['x'], tr['y']); time.sleep(2)
+        return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};
+    """, toggle)
+    do_click(driver, toggle, tr['x'], tr['y'])
+    time.sleep(2)
+
     for attempt in range(3):
         items = driver.execute_script(f"""
-            var res=[];
+            var res=[], target=arguments[0];
             document.querySelectorAll('a,li,div,span,option').forEach(function(el){{
                 if(!el.offsetParent) return;
-                if(el.textContent.trim()!=='{target}') return;
+                var t=el.textContent.trim();
+                if(t!==target) return;
                 var b=el.getBoundingClientRect();
                 if(b.width>=10&&b.height>=5)
                     res.push({{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}});
-            }}); return res;""")
+            }}); return res;
+        """, target_text)
+
         if items:
             ix, iy = items[0]['x'], items[0]['y']
+            print(f"  → Klik: '{target_text}' ({ix},{iy})")
             driver.execute_script("""
                 var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
-                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,screenX:x,screenY:y,button:0,buttons:0};
-                el.dispatchEvent(new MouseEvent('mouseover',o));
-                el.dispatchEvent(new MouseEvent('mouseenter',o));
-                el.dispatchEvent(new MouseEvent('mousemove',o));""", ix, iy); time.sleep(0.8)
-            driver.execute_script("""
-                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
-                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,screenX:x,screenY:y,button:0,buttons:1};
-                el.dispatchEvent(new MouseEvent('mousedown',o));
-                el.dispatchEvent(new MouseEvent('mouseup',o));
-                el.dispatchEvent(new MouseEvent('click',o));""", ix, iy); time.sleep(1)
+                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,
+                       screenX:x,screenY:y,button:0,buttons:1};
+                ['mouseover','mouseenter','mousemove','mousedown','mouseup','click']
+                .forEach(function(ev){ el.dispatchEvent(new MouseEvent(ev,o)); });
+            """, ix, iy)
+            time.sleep(1)
+
+            # Verifikasi nilai terpilih
             val = driver.execute_script("""
                 var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
                 for(var i=sels.length-1;i>=0;i--){
                     var t=sels[i].textContent.trim();
                     if(t&&t!=='---') return t;
-                } return '';""")
-            if val: print(f"  ✅  Shipment Status: '{val}'"); return True
-        if attempt < 2: time.sleep(1)
-    print("  ⚠️  Shipment Status: tidak bisa konfirmasi, lanjut ..."); return True
+                } return '';
+            """)
+            if val:
+                print(f"  ✅  Terpilih: '{val}'"); return True
 
-def run_cell3(driver, gc):
+        if attempt < 2:
+            time.sleep(1)
+
+    print(f"  ⚠️  '{target_text}' tidak ditemukan, lanjut..."); return True
+
+
+def run_cell_inventory_move(driver, gc):
     print("\n" + "="*60)
-    print("  🤖  CELL 3 — BOT v75 CO : Monitor SJ Detail (CO)")
+    print("  🤖  BOT — Inventory Move (Pengepokan) : In Progress")
     print("="*60)
     try:
-        driver.get(BOT75CO_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        driver.get(BOT75IM_REPORT_URL)
+        print("  ⏳  Tunggu load 25s ..."); time.sleep(25)
         wait_ready(driver)
+
         print("\n  📋  Input Controls ...")
-        fill_date_dialog(driver, "When Start", 0); time.sleep(0.8)
-        fill_date_dialog(driver, "When End",   1); time.sleep(0.8)
-        select_branch_locator(driver, "01");        time.sleep(0.8)
-        select_shipment_status(driver, "CO");       time.sleep(0.8)
+
+        # 1. Date Start (index 0) & Date End (index 1) — sama seperti sebelumnya
+        fill_date_dialog(driver, "Date Start", 0); time.sleep(0.8)
+        fill_date_dialog(driver, "Date End",   1); time.sleep(0.8)
+
+        # 2. Branch From — dropdown index 1 (index 0 = Organization)
+        select_dropdown_by_text(driver, 1, "01"); time.sleep(0.8)
+
+        # 3. Document Type → "Inventory Move (Pengepokan)" — dropdown index 2
+        select_dropdown_by_text(driver, 2, "Inventory Move (Pengepokan)"); time.sleep(0.8)
+
+        # 4. DocStatus → "In Progress" — dropdown index 3
+        select_dropdown_by_text(driver, 3, "In Progress"); time.sleep(0.8)
+
+        # 5. Klik Apply
         click_apply_dialog(driver)
         wait_loading(driver)
         time.sleep(3)
+
+        # 6. Export
         downloaded = export_xlsx(driver)
         if downloaded:
-            exp = save_to_export(downloaded, "MonitorSuratJalan_CO")
-            url = save_to_gsheet(gc, downloaded, "CO", "Monitor SJ CO")
-            bot_footer(exp, url, "CO")
+            exp = save_to_export(downloaded, "InventoryMove_InProgress")
+            url = save_to_gsheet(gc, downloaded, "IM_IP", "Inventory Move In Progress")
+            bot_footer(exp, url, "IM_IP")
         else:
             print("\n  ⚠️  Download gagal")
-    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+
+    except Exception as e:
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
 # CELL 4 — Monitor SJ In Progress IP → tab "IP"
