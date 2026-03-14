@@ -420,45 +420,46 @@ def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
-        # Cari toggle KHUSUS Warehouse Group — lewati Organization (index 0)
-        toggle = driver.execute_script("""
-            // Strategi 1: Cari via label 'Warehouse'
-            var labels = document.querySelectorAll('label, span, div, td, th, p');
-            for (var i = 0; i < labels.length; i++) {
-                var txt = labels[i].textContent.trim().toLowerCase();
-                if (txt.indexOf('warehouse') === -1) continue;
-                var parent = labels[i].closest('tr,li,div,fieldset,section');
-                if (!parent) parent = labels[i].parentElement;
-                if (!parent) continue;
-                // Cari di parent dan parent atasnya
-                var toggle = parent.querySelector('a.jr-mSingleselect-input');
-                if (!toggle && parent.parentElement)
-                    toggle = parent.parentElement.querySelector('a.jr-mSingleselect-input');
-                if (toggle) {
-                    var r = toggle.getBoundingClientRect();
-                    if (r.width > 0 && r.height > 0) return toggle;
-                }
-            }
-
-            // Strategi 2: Ambil index ke-1 (skip Organization di index 0)
-            var all = [];
+        # Ambil SEMUA visible toggles dulu untuk debug
+        all_toggles = driver.execute_script("""
+            var res = [];
             document.querySelectorAll('a.jr-mSingleselect-input').forEach(function(t) {
                 var r = t.getBoundingClientRect();
-                if (r.width > 0 && r.height > 0) all.push(t);
+                var p = t.closest('[id]');
+                res.push({
+                    visible: r.width > 0 && r.height > 0,
+                    parentId: p ? p.id : 'unknown',
+                    x: Math.round(r.left), y: Math.round(r.top),
+                    w: Math.round(r.width), h: Math.round(r.height)
+                });
             });
-            console.log('Total visible toggles: ' + all.length);
-            return all.length > 1 ? all[1] : (all.length === 1 ? all[0] : null);
+            return res;
+        """)
+        print(f"  📋  Semua toggles: {all_toggles}")
+
+        # Ambil VISIBLE toggle — skip index 0 (Organization), ambil index 1
+        toggle = driver.execute_script("""
+            var visible = [];
+            document.querySelectorAll('a.jr-mSingleselect-input').forEach(function(t) {
+                var r = t.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) visible.push(t);
+            });
+            // index 0 = Organization, index 1 = Warehouse Group
+            return visible.length > 1 ? visible[1] : null;
         """)
 
         if not toggle:
-            print("  ❌  Dropdown toggle tidak ditemukan!"); return False
+            print("  ❌  Toggle Warehouse Group tidak ditemukan (butuh minimal 2 dropdown)!")
+            return False
 
         parent_id = driver.execute_script(
             "var p=arguments[0].closest('[id]'); return p ? p.id : 'unknown';", toggle)
-        print(f"  🔍  Dropdown parent ID: '{parent_id}'")
+        print(f"  🔍  Toggle dipilih, parent ID: '{parent_id}'")
 
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
         time.sleep(0.8)
+
+        # Klik toggle dengan koordinat
         tr = driver.execute_script("""
             var r=arguments[0].getBoundingClientRect();
             return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};
@@ -491,10 +492,11 @@ def select_warehouse_group_v74(driver, item_text):
             """, item_text)
 
             if not match_el:
-                # Debug: tampilkan item yang ada di list
                 items = driver.execute_script("""
                     var res=[];
-                    document.querySelectorAll('.jr-mSingleselect-list li, ul.jr-mSelectlist li').forEach(function(el){
+                    document.querySelectorAll(
+                        '.jr-mSingleselect-list li, ul.jr-mSelectlist li'
+                    ).forEach(function(el){
                         if(el.offsetParent) res.push(el.textContent.trim());
                     });
                     return res.slice(0,10);
@@ -502,7 +504,7 @@ def select_warehouse_group_v74(driver, item_text):
                 print(f"    📋  Items tersedia: {items}")
                 time.sleep(1); continue
 
-            print(f"    ✔️  Elemen ditemukan, mencoba klik...")
+            print(f"    ✔️  Elemen ditemukan, klik...")
             driver.execute_script("""
                 var el=arguments[0];
                 el.scrollIntoView({block:'center'});
