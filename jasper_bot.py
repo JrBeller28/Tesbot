@@ -513,7 +513,7 @@ def validate_dates_v74(driver):
 
 def run_cell2(driver, gc):
     print("\n" + "="*60)
-    print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary With MR & Shipment Internal (Raw Data)")
+    print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
     print("="*60)
     try:
         driver.get(BOT74_REPORT_URL)
