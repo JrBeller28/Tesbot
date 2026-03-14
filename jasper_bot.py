@@ -380,7 +380,7 @@ BOT74_REPORT_URL = (
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = ""
+BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 
 def fill_date_v74(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
@@ -563,7 +563,7 @@ def select_dropdown_by_text(driver, toggle_index, target_text):
     print(f"  ⚠️  '{target_text}' tidak ditemukan, lanjut..."); return True
 
 
-def run_cell_inventory_move(driver, gc):
+def run_cell3(driver, gc):
     print("\n" + "="*60)
     print("  🤖  BOT — Inventory Move (Pengepokan) : In Progress")
     print("="*60)
