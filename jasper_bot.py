@@ -420,17 +420,38 @@ def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
-        # Cari dropdown secara dinamis tanpa hardcode ID
+        # Cari toggle KHUSUS Warehouse Group — lewati Organization (index 0)
         toggle = driver.execute_script("""
-            var toggles = document.querySelectorAll('a.jr-mSingleselect-input');
-            for (var i=0; i<toggles.length; i++) {
-                var r = toggles[i].getBoundingClientRect();
-                if (r.width > 0 && r.height > 0) return toggles[i];
+            // Strategi 1: Cari via label 'Warehouse'
+            var labels = document.querySelectorAll('label, span, div, td, th, p');
+            for (var i = 0; i < labels.length; i++) {
+                var txt = labels[i].textContent.trim().toLowerCase();
+                if (txt.indexOf('warehouse') === -1) continue;
+                var parent = labels[i].closest('tr,li,div,fieldset,section');
+                if (!parent) parent = labels[i].parentElement;
+                if (!parent) continue;
+                // Cari di parent dan parent atasnya
+                var toggle = parent.querySelector('a.jr-mSingleselect-input');
+                if (!toggle && parent.parentElement)
+                    toggle = parent.parentElement.querySelector('a.jr-mSingleselect-input');
+                if (toggle) {
+                    var r = toggle.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) return toggle;
+                }
             }
-            return null;
+
+            // Strategi 2: Ambil index ke-1 (skip Organization di index 0)
+            var all = [];
+            document.querySelectorAll('a.jr-mSingleselect-input').forEach(function(t) {
+                var r = t.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) all.push(t);
+            });
+            console.log('Total visible toggles: ' + all.length);
+            return all.length > 1 ? all[1] : (all.length === 1 ? all[0] : null);
         """)
+
         if not toggle:
-            print(f"  ❌  Dropdown toggle tidak ditemukan!"); return False
+            print("  ❌  Dropdown toggle tidak ditemukan!"); return False
 
         parent_id = driver.execute_script(
             "var p=arguments[0].closest('[id]'); return p ? p.id : 'unknown';", toggle)
@@ -447,6 +468,7 @@ def select_warehouse_group_v74(driver, item_text):
 
         for attempt in range(3):
             print(f"    attempt {attempt+1}: mencari '{item_text}'...")
+
             match_el = driver.execute_script("""
                 var txt=arguments[0], found=null;
                 var selectors=[
@@ -469,7 +491,16 @@ def select_warehouse_group_v74(driver, item_text):
             """, item_text)
 
             if not match_el:
-                print(f"    ⚠️  Elemen tidak ditemukan, tunggu..."); time.sleep(1); continue
+                # Debug: tampilkan item yang ada di list
+                items = driver.execute_script("""
+                    var res=[];
+                    document.querySelectorAll('.jr-mSingleselect-list li, ul.jr-mSelectlist li').forEach(function(el){
+                        if(el.offsetParent) res.push(el.textContent.trim());
+                    });
+                    return res.slice(0,10);
+                """)
+                print(f"    📋  Items tersedia: {items}")
+                time.sleep(1); continue
 
             print(f"    ✔️  Elemen ditemukan, mencoba klik...")
             driver.execute_script("""
