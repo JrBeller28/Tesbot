@@ -622,21 +622,28 @@ def select_dropdown_by_text(driver, toggle_index, target_text):
 def select_dropdown_by_label(driver, label_text, target_text):
     print(f"  🔽  {label_text} → '{target_text}'")
 
-    label = driver.find_element(By.XPATH, f"//*[contains(text(),'{label_text}')]")
+    try:
+        label = driver.find_element(By.XPATH, f"//*[contains(text(),'{label_text}')]")
 
-    container = label.find_element(By.XPATH, "./ancestor::div[contains(@class,'jr-mInputControl')]")
+        toggle = label.find_element(By.XPATH, "following::a[contains(@class,'jr-mSingleselect-input')][1]")
 
-    toggle = container.find_element(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
+        time.sleep(0.5)
 
-    toggle.click()
-    time.sleep(1)
+        toggle.click()
+        time.sleep(1)
 
-    option = driver.find_element(By.XPATH, f"//*[text()='{target_text}']")
-    option.click()
+        option = driver.find_element(By.XPATH, f"//*[text()='{target_text}']")
+        option.click()
 
-    time.sleep(1)
+        time.sleep(1)
 
-    print(f"  ✅  Terpilih: {target_text}")
+        print(f"  ✅  Terpilih: {target_text}")
+        return True
+
+    except Exception as e:
+        print(f"  ❌  {e}")
+        return False
     for attempt in range(3):
 
         items = driver.find_elements(By.XPATH, f"//*[text()='{target_text}']")
