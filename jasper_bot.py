@@ -535,32 +535,33 @@ def run_cell2(driver, gc):
     print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
     print("="*60)
     try:
-        driver.get(BOT74_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
-        wait_ready(driver)
-        print("\n  📋  Input Controls ...")
+    driver.get(BOT74_REPORT_URL)
+    print("  ⏳  25s tunggu load ...")
+    time.sleep(25)
 
-        fill_date_v74(driver, "Start Date", 0, START_DATE)
-        time.sleep(0.8)
+    wait_ready(driver)
 
-        fill_date_v74(driver, "End Date", 1, END_DATE)
-        time.sleep(0.8)
+    print("\n  📋  Input Controls ...")
 
-select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
-        so, eo = validate_dates_v74(driver)
-        if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
-        click_apply_dialog(driver)
-        wait_loading(driver)
-        time.sleep(3)
-        downloaded = export_xlsx(driver)
-        if downloaded:
-            exp  = save_to_export(downloaded, "MaterialTransactionSummary")
-            url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
-            bot_footer(exp, url, "Data")
-        else:
-            print("\n  ⚠️  Download gagal")
-    except SystemExit as se: print(f"\n  🛑  {se}")
-    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+    fill_date_v74(driver, "Start Date", 0, START_DATE)
+    time.sleep(0.8)
+
+    fill_date_v74(driver, "End Date", 1, END_DATE)
+    time.sleep(0.8)
+
+    select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
+
+    so, eo = validate_dates_v74(driver)
+
+    if not so or not eo:
+        raise SystemExit("VALIDASI TANGGAL GAGAL")
+
+    click_apply_dialog(driver)
+    wait_loading(driver)
+
+except Exception as e:
+     print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+   
 # =============================================================================
 # CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
 # =============================================================================
