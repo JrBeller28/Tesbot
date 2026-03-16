@@ -383,7 +383,7 @@ BOT74_REPORT_URL = (
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 from datetime import datetime
 
-START_DATE = "2025-01-01"
+START_DATE = "2025-07-01"
 END_DATE   = datetime.today().strftime("%Y-%m-%d")
 
 def fill_date_v74(driver, label, index, date_value):
@@ -558,11 +558,14 @@ def run_cell2(driver, gc):
         wait_loading(driver)
 
         downloaded = export_xlsx(driver)
-
-    except Exception as e:
-
-        print("❌ BOT ERROR")
-        print(e)
+        if downloaded:
+            exp  = save_to_export(downloaded, "MaterialTransactionSummary")
+            url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
+            bot_footer(exp, url, "Data")
+        else:
+            print("\n  ⚠️  Download gagal")
+    except SystemExit as se: print(f"\n  🛑  {se}")
+    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
    
 # =============================================================================
 # CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
