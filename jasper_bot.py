@@ -622,7 +622,24 @@ def select_dropdown_by_text(driver, toggle_index, target_text):
 
     toggle.click()
     time.sleep(1.5)
+def select_dropdown_by_label(driver, label_text, target_text):
+    print(f"  🔽  {label_text} → '{target_text}'")
 
+    label = driver.find_element(By.XPATH, f"//*[contains(text(),'{label_text}')]")
+
+    container = label.find_element(By.XPATH, "./ancestor::div[contains(@class,'jr-mInputControl')]")
+
+    toggle = container.find_element(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
+
+    toggle.click()
+    time.sleep(1)
+
+    option = driver.find_element(By.XPATH, f"//*[text()='{target_text}']")
+    option.click()
+
+    time.sleep(1)
+
+    print(f"  ✅  Terpilih: {target_text}")
     for attempt in range(3):
 
         items = driver.find_elements(By.XPATH, f"//*[text()='{target_text}']")
@@ -657,24 +674,7 @@ def select_dropdown_by_text(driver, toggle_index, target_text):
                     return True
 
         time.sleep(1)
-        def select_dropdown_by_label(driver, label_text, target_text):
-    print(f"  🔽  {label_text} → '{target_text}'")
-
-    label = driver.find_element(By.XPATH, f"//*[contains(text(),'{label_text}')]")
-
-    container = label.find_element(By.XPATH, "./ancestor::div[contains(@class,'jr-mInputControl')]")
-
-    toggle = container.find_element(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
-
-    toggle.click()
-    time.sleep(1)
-
-    option = driver.find_element(By.XPATH, f"//*[text()='{target_text}']")
-    option.click()
-
-    time.sleep(1)
-
-    print(f"  ✅  Terpilih: {target_text}")
+    
     print(f"  ⚠️  '{target_text}' tidak ditemukan")
     return False
 def run_cell3(driver, gc):
