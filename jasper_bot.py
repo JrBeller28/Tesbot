@@ -669,7 +669,7 @@ def run_cell3(driver, gc):
         print("\n  📋  Input Controls ...")
 
         # 1. Date Start (index 0) & Date End (index 1) — sama seperti sebelumnya
-        fill_date_dialog(driver, "Date Start", "01 Jan 2025"); time.sleep(0.8)
+        fill_date_dialog(driver, "Date Start", "2025-01-01"); time.sleep(0.8)
         fill_date_dialog(driver, "Date End",   1); time.sleep(0.8)
 
         # 2. Branch From — dropdown index 1 (index 0 = Organization)
