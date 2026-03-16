@@ -7,16 +7,7 @@ on:
       - '**.yml'
       - '**.yaml'
   workflow_dispatch:
-    inputs:
-      cell:
-        description: 'Cell (2 3 4 5 atau kosong = semua)'
-        required: false
-        default: ''
-      deadline:
-        description: 'Jam target selesai WIB, misal: 07:02 (kosong = tidak ada deadline)'
-        required: false
-        default: ''
-
+  
 concurrency:
   group: jasperbot
   cancel-in-progress: false  # run baru ANTRI, tidak cancel run sebelumnya
