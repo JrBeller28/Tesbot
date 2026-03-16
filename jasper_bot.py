@@ -560,6 +560,7 @@ def run_cell2(driver, gc):
     wait_loading(driver)
 
 except Exception as e:
+    print(f"❌ Error: {e}")
      print(f"\n  ❌  {e}\n{traceback.format_exc()}")
    
 # =============================================================================
