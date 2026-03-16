@@ -554,8 +554,13 @@ BOT75IM_REPORT_URL = (
     "&reportUnit=%2FiDempiere%2FLogistik%2FMonitorTrx%2FInventory_Move%2FMonitor_Status_Inventory_Move_In_Progress__Real_Time_"
     "&standAlone=true"
 )
-def fill_date_dialog(driver, label, index):
-    print(f"  📅  {label} → '{TODAY_STR}'")
+from datetime import datetime
+
+DATE_START = "2025-01-01"
+DATE_END   = datetime.today().strftime("%Y-%m-%d")
+
+def fill_date_dialog(driver, label, index, date_value):
+    print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
     try: driver.execute_script(
         "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
@@ -576,7 +581,7 @@ def fill_date_dialog(driver, label, index):
         ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
         inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
         inp.send_keys(Keys.DELETE);     time.sleep(0.1)
-        inp.send_keys(TODAY_STR);       time.sleep(0.3)
+        inp.send_keys(date_value);       time.sleep(0.3)
         inp.send_keys(Keys.TAB);        time.sleep(0.5)
         val = inp.get_attribute('value')
         if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
@@ -589,7 +594,7 @@ def fill_date_dialog(driver, label, index):
             ['focus','input','change','blur'].forEach(function(e){
                 el.dispatchEvent(new Event(e,{bubbles:true}));});
             el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, TODAY_STR); time.sleep(0.5)
+        """, inp, date_value); time.sleep(0.5)
         val = inp.get_attribute('value')
         if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
     except Exception as e: print(f"  ⚠️  S2: {e}")
@@ -669,8 +674,8 @@ def run_cell3(driver, gc):
         print("\n  📋  Input Controls ...")
 
         # 1. Date Start (index 0) & Date End (index 1) — sama seperti sebelumnya
-        fill_date_dialog(driver, "Date Start", "2025-01-01"); time.sleep(0.8)
-        fill_date_dialog(driver, "Date End",   1); time.sleep(0.8)
+        fill_date_dialog(driver, "Date Start", 0, DATE_START); time.sleep(0.8)
+        fill_date_dialog(driver, "Date End",   1, DATE_END);   time.sleep(0.8)
 
         # 2. Branch From — dropdown index 1 (index 0 = Organization)
         select_dropdown_by_text(driver, 1, "01"); time.sleep(0.8)
