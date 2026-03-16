@@ -600,68 +600,66 @@ def fill_date_dialog(driver, label, index, date_value):
     except Exception as e: print(f"  ⚠️  S2: {e}")
     print(f"  ❌  {label} GAGAL!"); return False
 def select_dropdown_by_text(driver, toggle_index, target_text):
-    """Pilih dropdown ke-N (dari visible toggles) dengan teks target."""
     print(f"  🔽  Dropdown [{toggle_index}] → '{target_text}'")
     driver.switch_to.default_content()
+
     try:
         toggles = driver.find_elements(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
-        visible  = [t for t in toggles if t.is_displayed()]
+        visible = [t for t in toggles if t.is_displayed()]
+
         if toggle_index >= len(visible):
-            print(f"  ❌  Toggle index {toggle_index} tidak ada (total: {len(visible)})")
+            print(f"  ❌  Toggle index {toggle_index} tidak ada")
             return False
+
         toggle = visible[toggle_index]
+
     except Exception as e:
-        print(f"  ❌  {e}"); return False
+        print(f"  ❌  {e}")
+        return False
 
     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
     time.sleep(0.5)
-    tr = driver.execute_script("""
-        var r=arguments[0].getBoundingClientRect();
-        return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};
-    """, toggle)
-    do_click(driver, toggle, tr['x'], tr['y'])
-    time.sleep(2)
+
+    toggle.click()
+    time.sleep(1.5)
 
     for attempt in range(3):
-        items = driver.execute_script(f"""
-            var res=[], target=arguments[0];
-            document.querySelectorAll('a,li,div,span,option').forEach(function(el){{
-                if(!el.offsetParent) return;
-                var t=el.textContent.trim();
-                if(t!==target) return;
-                var b=el.getBoundingClientRect();
-                if(b.width>=15&&b.height>=10)
-                    res.push({{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}});
-            }}); return res;
-        """, target_text)
 
-        if items:
-            ix, iy = items[0]['x'], items[0]['y']
-            print(f"  → Klik: '{target_text}' ({ix},{iy})")
-            driver.execute_script("""
-                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
-                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,
-                       screenX:x,screenY:y,button:0,buttons:1};
-                ['mouseover','mouseenter','mousemove','mousedown','mouseup','click']
-                .forEach(function(ev){ el.dispatchEvent(new MouseEvent(ev,o)); });
-            """, ix, iy)
-            time.sleep(1)
+        items = driver.find_elements(By.XPATH, f"//*[text()='{target_text}']")
 
-            # Verifikasi nilai terpilih
-            val = driver.execute_script("""
-            var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
-            if(sels.length>arguments[0]){
-            return sels[arguments[0]].textContent.trim();
-            }
-            return '';
-            """, toggle_index)
-            if val:
-                print(f"  ✅  Terpilih: '{val}'"); return True
+        for item in items:
+            if item.is_displayed():
+                print(f"  → Klik: '{target_text}'")
 
-        if attempt < 2:
-            time.sleep(1)
+                driver.execute_script("""
+                    arguments[0].click();
 
-    print(f"  ⚠️  '{target_text}' tidak ditemukan, lanjut..."); return True
+                    var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
+                    sels.forEach(function(s){
+                        s.dispatchEvent(new Event('change',{bubbles:true}));
+                        s.dispatchEvent(new Event('blur',{bubbles:true}));
+                    });
+                """, item)
+
+                time.sleep(1.5)
+
+                val = driver.execute_script("""
+                    var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
+                    for(var i=0;i<sels.length;i++){
+                        var t=sels[i].textContent.trim();
+                        if(t && t!=='---') return t;
+                    }
+                    return '';
+                """)
+
+                if val:
+                    print(f"  ✅  Terpilih: '{val}'")
+                    return True
+
+        time.sleep(1)
+
+    print(f"  ⚠️  '{target_text}' tidak ditemukan")
+    return False
 def run_cell3(driver, gc):
     print("\n" + "="*60)
     print("  🤖  BOT — Inventory Move (Pengepokan) : In Progress")
