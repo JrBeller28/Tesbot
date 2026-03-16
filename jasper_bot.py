@@ -381,23 +381,34 @@ BOT74_REPORT_URL = (
     "&standAlone=true"
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
+from datetime import datetime
 
-def fill_date_v74(driver, label, index):
-    print(f"  📅  {label} → '{TODAY_STR}'")
+DATE_START = "2025-01-01"
+DATE_END   = datetime.today().strftime("%Y-%m-%d")
+
+def fill_date_v74(driver, label, index, date_value):
+    print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
     try: driver.execute_script(
         "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
+    inp = None
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index >= len(inps): print(f"  ❌  index {index} tidak ada!"); return False
-    inp = inps[index]
+    if index < len(inps): inp = inps[index]
+    if not inp:
+        try:
+            all_inps = driver.find_elements(By.CSS_SELECTOR,
+                ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
+            if index < len(all_inps): inp = all_inps[index]
+        except: pass
+    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
     try:
         ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
         inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
         inp.send_keys(Keys.DELETE);     time.sleep(0.1)
-        inp.send_keys(TODAY_STR);       time.sleep(0.3)
+        inp.send_keys(date_value);       time.sleep(0.3)
         inp.send_keys(Keys.TAB);        time.sleep(0.5)
         val = inp.get_attribute('value')
         if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
