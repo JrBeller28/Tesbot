@@ -1,11 +1,8 @@
 name: Run JasperBot
 
 on:
-  push:
-    paths:
-      - '**.py'
-      - '**.yml'
-      - '**.yaml'
+  schedule:
+    - cron: "0 */1 * * *"
   workflow_dispatch:
   
 concurrency:
