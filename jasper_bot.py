@@ -531,37 +531,38 @@ def validate_dates_v74(driver):
     return so, eo
 
 def run_cell2(driver, gc):
+
     print("\n" + "="*60)
-    print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
+    print("🤖 CELL 2 — BOT v74")
     print("="*60)
+
     try:
-    driver.get(BOT74_REPORT_URL)
-    print("  ⏳  25s tunggu load ...")
-    time.sleep(25)
 
-    wait_ready(driver)
+        driver.get(BOT74_REPORT_URL)
+        time.sleep(25)
 
-    print("\n  📋  Input Controls ...")
+        wait_ready(driver)
 
-    fill_date_v74(driver, "Start Date", 0, START_DATE)
-    time.sleep(0.8)
+        fill_date_v74(driver, "Start Date", 0, START_DATE)
+        fill_date_v74(driver, "End Date", 1, END_DATE)
 
-    fill_date_v74(driver, "End Date", 1, END_DATE)
-    time.sleep(0.8)
+        select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
 
-    select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
+        so, eo = validate_dates_v74(driver)
 
-    so, eo = validate_dates_v74(driver)
+        if not so or not eo:
+            raise SystemExit("VALIDASI TANGGAL GAGAL")
 
-    if not so or not eo:
-        raise SystemExit("VALIDASI TANGGAL GAGAL")
+        click_apply_dialog(driver)
 
-    click_apply_dialog(driver)
-    wait_loading(driver)
+        wait_loading(driver)
 
-except Exception as e:
-    print(f"❌ Error: {e}")
-     print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+        downloaded = export_xlsx(driver)
+
+    except Exception as e:
+
+        print("❌ BOT ERROR")
+        print(e)
    
 # =============================================================================
 # CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
