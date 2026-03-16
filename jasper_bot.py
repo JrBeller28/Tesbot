@@ -383,8 +383,8 @@ BOT74_REPORT_URL = (
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 from datetime import datetime
 
-DATE_START = "2025-01-01"
-DATE_END   = datetime.today().strftime("%Y-%m-%d")
+START_DATE = "2025-01-01"
+END_DATE   = datetime.today().strftime("%Y-%m-%d")
 
 def fill_date_v74(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
