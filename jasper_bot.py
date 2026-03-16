@@ -539,9 +539,14 @@ def run_cell2(driver, gc):
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
         print("\n  📋  Input Controls ...")
-        fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
-        fill_date_v74(driver, "End Date",   1); time.sleep(0.8)
-        select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
+
+        fill_date_v74(driver, "Start Date", 0, START_DATE)
+        time.sleep(0.8)
+
+        fill_date_v74(driver, "End Date", 1, END_DATE)
+        time.sleep(0.8)
+
+select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
         so, eo = validate_dates_v74(driver)
         if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
         click_apply_dialog(driver)
