@@ -619,9 +619,6 @@ def select_dropdown_by_text(driver, toggle_index, target_text):
 
     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
     time.sleep(0.5)
-
-    toggle.click()
-    time.sleep(1.5)
 def select_dropdown_by_label(driver, label_text, target_text):
     print(f"  🔽  {label_text} → '{target_text}'")
 
@@ -681,34 +678,37 @@ def run_cell3(driver, gc):
     print("\n" + "="*60)
     print("  🤖  BOT — Inventory Move (Pengepokan) : In Progress")
     print("="*60)
+
     try:
         driver.get(BOT75IM_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        print("  ⏳  25s tunggu load ...")
+        time.sleep(25)
+
         wait_ready(driver)
 
         print("\n  📋  Input Controls ...")
 
-        # 1. Date Start (index 0) & Date End (index 1) — sama seperti sebelumnya
-        fill_date_dialog(driver, "Date Start", 0, DATE_START); time.sleep(0.8)
-        fill_date_dialog(driver, "Date End",   1, DATE_END);   time.sleep(0.8)
+        fill_date_dialog(driver, "Date Start", 0, DATE_START)
+        time.sleep(0.8)
+
+        fill_date_dialog(driver, "Date End", 1, DATE_END)
+        time.sleep(0.8)
 
         select_dropdown_by_label(driver, "Branch From", "01")
-time.sleep(0.8)
+        time.sleep(0.8)
 
-select_dropdown_by_label(driver, "Document Type", "Inventory Move (Pengepokan)")
-time.sleep(0.8)
+        select_dropdown_by_label(driver, "Document Type", "Inventory Move (Pengepokan)")
+        time.sleep(0.8)
 
-select_dropdown_by_label(driver, "DocStatus", "In Progress")
-time.sleep(0.8)
+        select_dropdown_by_label(driver, "DocStatus", "In Progress")
+        time.sleep(0.8)
 
-
-        # 5. Klik Apply
         click_apply_dialog(driver)
         wait_loading(driver)
         time.sleep(3)
 
-        # 6. Export
         downloaded = export_xlsx(driver)
+
         if downloaded:
             exp = save_to_export(downloaded, "InventoryMove_InProgress")
             url = save_to_gsheet(gc, downloaded, "IM_IP", "Inventory Move In Progress")
