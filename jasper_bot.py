@@ -649,12 +649,12 @@ def select_dropdown_by_text(driver, toggle_index, target_text):
 
             # Verifikasi nilai terpilih
             val = driver.execute_script("""
-                var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
-                for(var i=sels.length-1;i>=0;i--){
-                    var t=sels[i].textContent.trim();
-                    if(t&&t!=='---') return t;
-                } return '';
-            """)
+            var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
+            if(sels.length>arguments[0]){
+            return sels[arguments[0]].textContent.trim();
+            }
+            return '';
+            """, toggle_index)
             if val:
                 print(f"  ✅  Terpilih: '{val}'"); return True
 
