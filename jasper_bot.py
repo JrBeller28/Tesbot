@@ -678,11 +678,11 @@ def run_cell3(driver, gc):
         # 2. Branch From — dropdown index 1 (index 0 = Organization)
         select_dropdown_by_text(driver, 1, "01"); time.sleep(0.8)
 
-        # 3. Document Type → "Inventory Move (Pengepokan)" — dropdown index 2
-        select_dropdown_by_text(driver, 2, "Inventory Move (Pengepokan)"); time.sleep(0.8)
+        # 3. Document Type → "Inventory Move (Pengepokan)" — dropdown index 3
+        select_dropdown_by_text(driver, 3, "Inventory Move (Pengepokan)"); time.sleep(0.8)
 
-        # 4. DocStatus → "In Progress" — dropdown index 3
-        select_dropdown_by_text(driver, 3, "In Progress"); time.sleep(0.8)
+        # 4. DocStatus → "In Progress" — dropdown index 4
+        select_dropdown_by_text(driver, 4, "In Progress"); time.sleep(0.8)
 
         # 5. Klik Apply
         click_apply_dialog(driver)
