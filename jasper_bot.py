@@ -566,123 +566,9 @@ def run_cell2(driver, gc):
             print("\n  ⚠️  Download gagal")
     except SystemExit as se: print(f"\n  🛑  {se}")
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+
 # =============================================================================
-# CELL 3 — Material Transaction Summary → tab "MTS ALL"
-# =============================================================================
-BOT78_REPORT_URL = (
-    f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
-    "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
-    "&standAlone=true"
-)
-BOT78_WAREHOUSE_GROUP = "SCM WHS"
-
-def fill_date_v78(driver, label, index):
-    print(f"  📅  {label} → '{TODAY_STR}'")
-    driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
-    except: pass
-    time.sleep(0.3)
-    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index >= len(inps): print(f"  ❌  index {index} tidak ada!"); return False
-    inp = inps[index]
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
-    try:
-        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
-        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
-        inp.send_keys(TODAY_STR);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);        time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S1: {e}")
-    try:
-        driver.execute_script("""
-            var el=arguments[0],v=arguments[1];
-            var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-            s.call(el,v); el.value=v;
-            ['focus','input','change','blur'].forEach(function(e){
-                el.dispatchEvent(new Event(e,{bubbles:true}));});
-            el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, TODAY_STR); time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S2: {e}")
-    print(f"  ❌  {label} GAGAL!"); return False
-
-def select_warehouse_group_v78(driver, item_text):
-    print(f"  📦  Warehouse Group: '{item_text}'")
-    driver.switch_to.default_content()
-    try:
-        wg = driver.find_element(By.ID, "WarehouseGroup")
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
-        toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
-        tr = driver.execute_script("""
-            var r=arguments[0].getBoundingClientRect();
-            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
-        do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
-        for attempt in range(2):
-            matches = driver.execute_script("""
-                var res=[],txt=arguments[0];
-                document.querySelectorAll('a,li,span,div').forEach(function(el){
-                    if(el.textContent.trim()!==txt) return;
-                    var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top<1080)
-                        res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
-                }); return res;""", item_text)
-            print(f"    attempt {attempt+1}: {matches}")
-            if not matches: time.sleep(1); continue
-            ix, iy = matches[0]['cx'], matches[0]['cy']
-            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
-            do_click(driver, el, ix, iy); time.sleep(1.2)
-            val = driver.execute_script("""
-                var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
-                return s?s.textContent.trim():'---';""")
-            if val not in ('---', ''): print(f"  ✅  '{val}'"); return True
-        return False
-    except Exception as e: print(f"  ❌  {e}"); return False
-
-def validate_dates_v78(driver):
-    driver.switch_to.default_content()
-    result = driver.execute_script(r"""
-        var d={sv:'',ev:''};
-        var inps=document.querySelectorAll('input.date.hasDatepicker');
-        if(inps[0]) d.sv=inps[0].value.trim();
-        if(inps[1]) d.ev=inps[1].value.trim();
-        return d;""")
-    sv, ev = result['sv'], result['ev']
-    so, eo = bool(sv), bool(ev)
-    print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
-    return so, eo
-
-def run_cell2(driver, gc):
-    print("\n" + "="*60)
-    print("  🤖  CELL 2 — BOT v74 : Material Transaction Summary")
-    print("="*60)
-    try:
-        driver.get(BOT74_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
-        wait_ready(driver)
-        print("\n  📋  Input Controls ...")
-        fill_date_v78(driver, "Start Date", 0); time.sleep(0.8)
-        fill_date_v78(driver, "End Date",   1); time.sleep(0.8)
-        select_warehouse_group_v78(driver, BOT78_WAREHOUSE_GROUP)
-        so, eo = validate_dates_v78(driver)
-        if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
-        click_apply_dialog(driver)
-        wait_loading(driver)
-        time.sleep(3)
-        downloaded = export_xlsx(driver)
-        if downloaded:
-            exp  = save_to_export(downloaded, "MaterialTransactionSummary")
-            url  = save_to_gsheet(gc, downloaded, "MTS ALL", "MTS ALL")
-            bot_footer(exp, url, "Data")
-        else:
-            print("\n  ⚠️  Download gagal")
-    except SystemExit as se: print(f"\n  🛑  {se}")
-    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
-# =============================================================================
-# CELL 4 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
+# CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
 # =============================================================================
 BOT75IM_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
@@ -817,7 +703,7 @@ def select_dropdown_by_label(driver, label_text, target_text):
     
     print(f"  ⚠️  '{target_text}' tidak ditemukan")
     return False
-def run_cell4(driver, gc):
+def run_cell3(driver, gc):
     print("\n" + "="*60)
     print("  🤖  BOT — Inventory Move (Pengepokan) : In Progress")
     print("="*60)
@@ -862,7 +748,7 @@ def run_cell4(driver, gc):
     except Exception as e:
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
-# CELL 5 — Monitor SJ In Progress IP → tab "IP"
+# CELL 4 — Monitor SJ In Progress IP → tab "IP"
 # =============================================================================
 BOT75IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
@@ -950,7 +836,7 @@ def select_branch_ip(driver):
         if attempt < 2: time.sleep(1.5)
     print("  ⚠️  Branch: tidak bisa konfirmasi, lanjut ..."); return True
 
-def run_cell5(driver, gc):
+def run_cell4(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 4 — BOT v75 IP : Monitor SJ In Progress (IP)")
     print("="*60)
@@ -972,7 +858,7 @@ def run_cell5(driver, gc):
             print("\n  ⚠️  Download gagal")
     except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
-# CELL 6 — iDempiere ERP → tab "IP_iDempiere"
+# CELL 5 — iDempiere ERP → tab "IP_iDempiere"
 # =============================================================================
 def convert_xls_to_xlsx(xls_path):
     xlsx_path = xls_path.replace(".xls", ".xlsx")
@@ -1046,7 +932,7 @@ def select_date_erp(driver, label_text, index):
     except Exception as e:
         print(f"   ⚠️ Gagal memilih tanggal {label_text}: {e}")
 
-def run_cell6(driver, gc):
+def run_cell5(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 5 — iDempiere ERP → tab 'IP_iDempiere'")
     print("="*60)
