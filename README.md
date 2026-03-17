@@ -98,3 +98,7 @@ Data akan otomatis masuk ke Google Sheets:
 - **Bot gagal?** → Buka tab Actions → klik run yang gagal → lihat log → download debug screenshots
 - **Jadwal tidak jalan?** → GitHub kadang delay 5-15 menit untuk scheduled workflow
 - **Google Sheets tidak terupdate?** → Pastikan sheet sudah di-share ke email service account
+
+# Tesbot
+
+trigger schedule
