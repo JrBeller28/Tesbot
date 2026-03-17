@@ -569,12 +569,12 @@ def run_cell2(driver, gc):
 # =============================================================================
 # CELL 3 — Material Transaction Summary → tab "MTS ALL"
 # =============================================================================
-BOT74_REPORT_URL = (
+BOT78_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
     "&reportUnit=/iDempiere/Inventory/Stock/MaterialTransactionSummary"
     "&standAlone=true"
 )
-BOT74_WAREHOUSE_GROUP = "SCM WHS"
+BOT78_WAREHOUSE_GROUP = "SCM WHS"
 
 def fill_date_v78(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
