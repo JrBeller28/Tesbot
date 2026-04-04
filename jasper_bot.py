@@ -1092,12 +1092,75 @@ def run_all_shared(gc, cells):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cell", type=int, action="append", dest="cells",
+                        help="Cell yang dijalankan (bisa diulang: --cell 2 --cell 3)")
+    parser.add_argument("--deadline", type=str, default="",
+                        help="Target selesai dalam format HH:MM WIB, e.g. 14:30")
+    args = parser.parse_args()
+
+    cells = sorted(set(args.cells)) if args.cells else [2, 3, 4, 5]
+    valid = [c for c in cells if c in (2, 3, 4, 5)]
+    if not valid:
+        print("❌ Tidak ada cell valid (hanya 2–5)"); sys.exit(1)
+
+    # Deadline mode
+    deadline_dt = None
+    if args.deadline:
+        try:
+            h, m = map(int, args.deadline.split(":"))
+            now = datetime.now(WIB)
+            deadline_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if deadline_dt < now:
+                print(f"⚠️ Deadline {args.deadline} sudah lewat, abaikan deadline.")
+                deadline_dt = None
+            else:
+                print(f"🕐 DEADLINE MODE: target selesai {args.deadline} WIB "
+                      f"({int((deadline_dt - now).total_seconds() / 60)} menit lagi)")
+        except ValueError:
+            print(f"⚠️ Format deadline salah '{args.deadline}', abaikan."); deadline_dt = None
+
     print(f"🤖 JasperBot START — {datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S WIB')}")
-    cells = [2, 3, 4, 5]
-    print(f"   Cell    : {cells}")
-    print(f"   Mode    : 1 browser → 1 login → {len(cells)} tab")
+    print(f"   Cell    : {valid}")
+    print(f"   Mode    : 1 browser → 1 login → {len(valid)} tab")
 
     gc = init_gc()
-    run_all_shared(gc, cells)
+
+    if deadline_dt:
+        # Jalankan cell satu per satu, cek deadline setelah tiap cell
+        driver = make_driver(DOWNLOAD_DIR)
+        try:
+            driver.execute_cdp_cmd("Page.setDownloadBehavior",
+                {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+        except: pass
+
+        jasper_cells = [c for c in valid if c in (2, 3, 4)]
+        erp_cells    = [c for c in valid if c == 5]
+
+        if jasper_cells:
+            do_login(driver)
+
+        first_tab = driver.window_handles[0]
+
+        for cell in valid:
+            if datetime.now(WIB) >= deadline_dt:
+                print(f"\n⏰ Deadline tercapai, cell {cell}+ dilewati."); break
+            try:
+                driver.execute_cdp_cmd("Page.setDownloadBehavior",
+                    {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+            except: pass
+            open_new_tab(driver)
+            if   cell == 2: run_cell2(driver, gc)
+            elif cell == 3: run_cell3(driver, gc)
+            elif cell == 4: run_cell4(driver, gc)
+            elif cell == 5: run_cell5(driver, gc)
+            driver.switch_to.window(first_tab)
+
+        try: driver.quit()
+        except: pass
+    else:
+        run_all_shared(gc, valid)
 
     print(f"\n🏁 JasperBot SELESAI — {datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S WIB')}")
