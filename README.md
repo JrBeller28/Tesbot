@@ -14,6 +14,7 @@ Bot otomatis yang login ke JasperServer, download laporan, dan upload ke Google 
    - `jasper_bot.py`
    - `.github/workflows/jasper_bot.yml`
 
+Recovery : F4BPZA2HQXEA518Z3GY3DM14
 ---
 
 ### Langkah 2 — Buat Google Service Account
