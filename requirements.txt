@@ -4,3 +4,7 @@ google-auth
 google-api-python-client
 openpyxl
 xlrd
+flask
+twilio
+requests
+gunicorn
