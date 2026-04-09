@@ -857,7 +857,7 @@ def run_cell4(driver, gc):
         
         click_apply_dialog(driver)
         wait_loading(driver)
-        
+        time.sleep(10)
         downloaded = export_xlsx(driver)
         if downloaded:
             # Beri nama file yang berbeda agar tidak tertukar dengan Cell 2
