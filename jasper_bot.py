@@ -749,123 +749,73 @@ BOT77_REPORT_URL = (
 )
 BOT77_WAREHOUSE_GROUP = "SCM"
 
-def fill_date_v77(driver, label, index):
-    print(f"  📅  {label} → '{TODAY_STR}'")
-    driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
-    except: pass
-    time.sleep(0.3)
-    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index >= len(inps): print(f"  ❌  index {index} tidak ada!"); return False
-    inp = inps[index]
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
-    try:
-        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
-        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
-        inp.send_keys(TODAY_STR);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);        time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S1: {e}")
-    try:
-        driver.execute_script("""
-            var el=arguments[0],v=arguments[1];
-            var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-            s.call(el,v); el.value=v;
-            ['focus','input','change','blur'].forEach(function(e){
-                el.dispatchEvent(new Event(e,{bubbles:true}));});
-            el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, TODAY_STR); time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S2: {e}")
-    print(f"  ❌  {label} GAGAL!"); return False
-
-def select_warehouse_group_v77(driver, item_text):
-    print(f"  📦  Warehouse Group: '{item_text}'")
-    driver.switch_to.default_content()
-    try:
-        wg = driver.find_element(By.ID, "WarehouseGroup")
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
-        toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
-        tr = driver.execute_script("""
-            var r=arguments[0].getBoundingClientRect();
-            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
-        do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
-        for attempt in range(2):
-            matches = driver.execute_script("""
-                var res=[],txt=arguments[0];
-                document.querySelectorAll('a,li,span,div').forEach(function(el){
-                    if(el.textContent.trim()!==txt) return;
-                    var r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top<1080)
-                        res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
-                }); return res;""", item_text)
-            print(f"    attempt {attempt+1}: {matches}")
-            if not matches: time.sleep(1); continue
-            ix, iy = matches[0]['cx'], matches[0]['cy']
-            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
-            do_click(driver, el, ix, iy); time.sleep(1.2)
-            val = driver.execute_script("""
-                var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
-                return s?s.textContent.trim():'---';""")
-            if val not in ('---', ''): print(f"  ✅  '{val}'"); return True
-        return False
-    except Exception as e: print(f"  ❌  {e}"); return False
-
-def validate_dates_v77(driver):
-    driver.switch_to.default_content()
-    result = driver.execute_script(r"""
-        var d={sv:'',ev:''};
-        var inps=document.querySelectorAll('input.date.hasDatepicker');
-        if(inps[0]) d.sv=inps[0].value.trim();
-        if(inps[1]) d.ev=inps[1].value.trim();
-        return d;""")
-    sv, ev = result['sv'], result['ev']
-    so, eo = bool(sv), bool(ev)
-    print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
-    return so, eo
-
 def run_cell4(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 4 — BOT v77 : MTS Raw Data (MR & Shipment)")
     print("="*60)
     
-    # Gunakan tanggal yang sama dengan Cell 2 atau tentukan sendiri
-    # Contoh: Start dari awal bulan ini sampai hari ini
+    # 1. Tentukan Tanggal (Pastikan Tahun Benar, bukan 2026)
+    # Start: Tanggal 1 bulan ini | End: Hari ini
     ST_DATE = datetime.now().strftime("%Y-%m-01") 
     EN_DATE = datetime.now().strftime("%Y-%m-%d")
 
     try:
+        print(f"  🌐  Membuka Report Unit...")
         driver.get(BOT77_REPORT_URL)
-        print("  ⏳  Tunggu load report..."); time.sleep(25)
+        
+        # Beri waktu load awal lebih lama karena Raw Data berat
+        time.sleep(30) 
         wait_ready(driver)
         
         print("\n  📋  Input Controls ...")
-        # SEKARANG SUDAH AMAN: Memanggil dengan 4 argumen
-        fill_date_v74(driver, "Start Date", 0, ST_DATE) 
-        time.sleep(0.8)
-        fill_date_v74(driver, "End Date",   1, EN_DATE) 
-        time.sleep(0.8)
         
+        # Gunakan fill_date_v74 (4 argumen) yang sudah diperbaiki di Cell 2
+        fill_date_v74(driver, "Start Date", 0, ST_DATE) 
+        time.sleep(1)
+        fill_date_v74(driver, "End Date",   1, EN_DATE) 
+        time.sleep(1)
+        
+        # Pilih Warehouse Group
         select_warehouse_group_v77(driver, BOT77_WAREHOUSE_GROUP)
         
+        # Validasi sebelum Apply
         so, eo = validate_dates_v77(driver)
-        if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
-        
+        if not so or not eo: 
+            print("  ⚠️ Mencoba isi ulang tanggal karena validasi gagal...")
+            fill_date_v74(driver, "Start Date", 0, ST_DATE)
+            fill_date_v74(driver, "End Date",   1, EN_DATE)
+
+        # 2. Klik Apply & Tunggu Proses yang Sangat Lama
         click_apply_dialog(driver)
-        wait_loading(driver)
-        time.sleep(10)
+        
+        # KHUSUS RAW DATA: Kita beri waktu tunggu lebih sabar
+        print("  ⏳ Menunggu Report Raw Data digenerate (Bisa memakan waktu lama)...")
+        wait_loading(driver) 
+        
+        # Jeda tambahan setelah loading hilang agar tombol Export benar-benar aktif
+        print("  ⏳ Loading selesai, stabilisasi UI 15 detik...")
+        time.sleep(15)
+
+        # 3. Export XLSX
         downloaded = export_xlsx(driver)
+        
         if downloaded:
-            # Beri nama file yang berbeda agar tidak tertukar dengan Cell 2
-            exp  = save_to_export(downloaded, "MTS_Raw_Data")
-            url  = save_to_gsheet(gc, downloaded, "MTS_Raw", "MTS Raw Data")
+            # Beri nama file unik agar tidak tertabrak Cell 2
+            exp  = save_to_export(downloaded, "MTS_Raw_Data_Detail")
+            url  = save_to_gsheet(gc, downloaded, "MTS_Raw", "MTS Raw Data Detail")
             bot_footer(exp, url, "MTS_Raw")
         else:
-            print("\n  ⚠️  Download gagal")
+            # Jika gagal export, coba sekali lagi (Retry)
+            print("  🔄 Mencoba klik Export ulang...")
+            time.sleep(5)
+            downloaded = export_xlsx(driver)
+            if downloaded:
+                exp = save_to_export(downloaded, "MTS_Raw_Data_Detail")
+                url = save_to_gsheet(gc, downloaded, "MTS_Raw", "MTS Raw Data Detail")
+                bot_footer(exp, url, "MTS_Raw")
+            else:
+                print("\n  ❌ Export gagal total setelah retry.")
+                
     except Exception as e:
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
