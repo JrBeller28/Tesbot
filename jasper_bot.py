@@ -389,43 +389,34 @@ END_DATE   = datetime.today().strftime("%Y-%m-%d")
 def fill_date_v74(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    try: 
+        driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
-    inp = None
+    
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index < len(inps): inp = inps[index]
-    if not inp:
+    if index >= len(inps):
+        # Coba cari input teks biasa jika datepicker tidak terdeteksi
+        inps = driver.find_elements(By.CSS_SELECTOR, ".jr-mDialog input[type='text']")
+        
+    if index < len(inps):
+        inp = inps[index]
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
+        time.sleep(0.4)
         try:
-            all_inps = driver.find_elements(By.CSS_SELECTOR,
-                ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
-            if index < len(all_inps): inp = all_inps[index]
-        except: pass
-    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
-    try:
-        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
-        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
-        inp.send_keys(date_value);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);        time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S1: {e}")
-    try:
-        driver.execute_script("""
-            var el=arguments[0],v=arguments[1];
-            var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-            s.call(el,v); el.value=v;
-            ['focus','input','change','blur'].forEach(function(e){
-                el.dispatchEvent(new Event(e,{bubbles:true}));});
-            el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, TODAY_STR); time.sleep(0.5)
-        val = inp.get_attribute('value')
-        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S2: {e}")
-    print(f"  ❌  {label} GAGAL!"); return False
+            inp.click()
+            inp.send_keys(Keys.CONTROL + "a")
+            inp.send_keys(Keys.DELETE)
+            inp.send_keys(date_value)
+            inp.send_keys(Keys.TAB)
+            time.sleep(0.5)
+            trigger_events(driver, inp)
+            return True
+        except Exception as e:
+            print(f"  ⚠️  Gagal isi tanggal: {e}")
+    
+    print(f"  ❌  {label} tidak ditemukan!")
+    return False
 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
@@ -533,7 +524,7 @@ def validate_dates_v74(driver):
 def run_cell2(driver, gc):
 
     print("\n" + "="*60)
-    print("🤖 CELL 2 — BOT v74")
+    print("🤖 CELL 2 — Material Transaction Summary — BOT v74")
     print("="*60)
 
     try:
@@ -838,30 +829,44 @@ def validate_dates_v77(driver):
 
 def run_cell4(driver, gc):
     print("\n" + "="*60)
-    print("  🤖  CELL 4 — BOT v77 : Material Transaction Summary")
+    print("  🤖  CELL 4 — BOT v77 : MTS Raw Data (MR & Shipment)")
     print("="*60)
+    
+    # Gunakan tanggal yang sama dengan Cell 2 atau tentukan sendiri
+    # Contoh: Start dari awal bulan ini sampai hari ini
+    ST_DATE = datetime.now().strftime("%Y-%m-01") 
+    EN_DATE = datetime.now().strftime("%Y-%m-%d")
+
     try:
         driver.get(BOT77_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        print("  ⏳  Tunggu load report..."); time.sleep(25)
         wait_ready(driver)
+        
         print("\n  📋  Input Controls ...")
-        fill_date_v74(driver, "Start Date", 0); time.sleep(0.8)
-        fill_date_v74(driver, "End Date",   1); time.sleep(0.8)
+        # SEKARANG SUDAH AMAN: Memanggil dengan 4 argumen
+        fill_date_v74(driver, "Start Date", 0, ST_DATE) 
+        time.sleep(0.8)
+        fill_date_v74(driver, "End Date",   1, EN_DATE) 
+        time.sleep(0.8)
+        
         select_warehouse_group_v77(driver, BOT77_WAREHOUSE_GROUP)
+        
         so, eo = validate_dates_v77(driver)
         if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
+        
         click_apply_dialog(driver)
         wait_loading(driver)
-        time.sleep(3)
+        
         downloaded = export_xlsx(driver)
         if downloaded:
-            exp  = save_to_export(downloaded, "MaterialTransactionSummary")
-            url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
-            bot_footer(exp, url, "Data")
+            # Beri nama file yang berbeda agar tidak tertukar dengan Cell 2
+            exp  = save_to_export(downloaded, "MTS_Raw_Data")
+            url  = save_to_gsheet(gc, downloaded, "MTS_Raw", "MTS Raw Data")
+            bot_footer(exp, url, "MTS_Raw")
         else:
             print("\n  ⚠️  Download gagal")
-    except SystemExit as se: print(f"\n  🛑  {se}")
-    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+    except Exception as e:
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
 # CELL 5 — iDempiere ERP → tab "IP_iDempiere"
 # =============================================================================
