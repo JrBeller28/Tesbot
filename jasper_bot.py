@@ -743,12 +743,13 @@ def run_cell3(driver, gc):
 # =============================================================================
 BOT77_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow"
+    "&ParentFolderUri=%2FiDempiere%2FInventory%2FStock"
     "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMaterial_Transaction_Summary_With_MR___Shipment_Internal__Raw_Data_"
     "&standAlone=true"
 )
 BOT77_WAREHOUSE_GROUP = "SCM"
 
-def fill_date_v74(driver, label, index):
+def fill_date_v77(driver, label, index):
     print(f"  📅  {label} → '{TODAY_STR}'")
     driver.switch_to.default_content()
     try: driver.execute_script(
