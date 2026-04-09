@@ -749,6 +749,38 @@ BOT77_REPORT_URL = (
 )
 BOT77_WAREHOUSE_GROUP = "SCM"
 
+def select_warehouse_group_v77(driver, item_text):
+    print(f"  📦  Warehouse Group: '{item_text}'")
+    driver.switch_to.default_content()
+    try:
+        wg = driver.find_element(By.ID, "WarehouseGroup")
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg); time.sleep(0.8)
+        toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
+        tr = driver.execute_script("""
+            var r=arguments[0].getBoundingClientRect();
+            return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};""", toggle)
+        do_click(driver, toggle, tr['x'], tr['y']); time.sleep(2.5)
+        for attempt in range(2):
+            matches = driver.execute_script("""
+                var res=[],txt=arguments[0];
+                document.querySelectorAll('a,li,span,div').forEach(function(el){
+                    if(el.textContent.trim()!==txt) return;
+                    var r=el.getBoundingClientRect();
+                    if(r.width>0&&r.height>0&&r.top<1080)
+                        res.push({cx:Math.round(r.left+r.width/2),cy:Math.round(r.top+r.height/2)});
+                }); return res;""", item_text)
+            print(f"    attempt {attempt+1}: {matches}")
+            if not matches: time.sleep(1); continue
+            ix, iy = matches[0]['cx'], matches[0]['cy']
+            el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
+            do_click(driver, el, ix, iy); time.sleep(1.2)
+            val = driver.execute_script("""
+                var s=document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
+                return s?s.textContent.trim():'---';""")
+            if val not in ('---', ''): print(f"  ✅  '{val}'"); return True
+        return False
+    except Exception as e: print(f"  ❌  {e}"); return False
+        
 def run_cell4(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 4 — BOT v77 : MTS Raw Data (MR & Shipment)")
