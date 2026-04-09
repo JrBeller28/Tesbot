@@ -796,9 +796,9 @@ def run_cell4(driver, gc):
         wait_ready(driver)
         
         # Isi tanggal (Pastikan memanggil fill_date_v74 dengan 4 argumen)
-        fill_date_v77(driver, "Start Date", 0, ST_DATE) 
+        fill_date_v74(driver, "Start Date", 0, ST_DATE) 
         time.sleep(2)
-        fill_date_v77(driver, "End Date",   1, EN_DATE) 
+        fill_date_v74(driver, "End Date",   1, EN_DATE) 
         time.sleep(2)
         
         # Pilih Warehouse
@@ -808,8 +808,8 @@ def run_cell4(driver, gc):
         so, eo = validate_dates_v77(driver)
         if not so or not eo: 
             print("  ⚠️ Mencoba isi ulang tanggal karena validasi gagal...")
-            fill_date_v77(driver, "Start Date", 0, ST_DATE)
-            fill_date_v77(driver, "End Date",   1, EN_DATE)
+            fill_date_v74(driver, "Start Date", 0, ST_DATE)
+            fill_date_v74(driver, "End Date",   1, EN_DATE)
 
         # 2. Klik Apply & Tunggu Proses yang Sangat Lama
         click_apply_dialog(driver)
