@@ -786,36 +786,30 @@ def run_cell4(driver, gc):
     print("  🤖  CELL 4 — BOT v77 : MTS Raw Data (MR & Shipment)")
     print("="*60)
     
-    # 1. Tentukan Tanggal (Pastikan Tahun Benar, bukan 2026)
-    # Start: Tanggal 1 bulan ini | End: Hari ini
-    ST_DATE = datetime.now().strftime("%Y-%m-01") 
-    EN_DATE = datetime.now().strftime("%Y-%m-%d")
+    # PERBAIKAN TANGGAL: Gunakan tahun sekarang, bukan 2026
+    ST_DATE = datetime.now().strftime("%Y-%m-01") # Awal bulan ini
+    EN_DATE = datetime.now().strftime("%Y-%m-%d") # Hari ini
 
     try:
-        print(f"  🌐  Membuka Report Unit...")
         driver.get(BOT77_REPORT_URL)
-        
-        # Beri waktu load awal lebih lama karena Raw Data berat
-        time.sleep(30) 
+        time.sleep(30) # Tunggu lebih lama agar form input muncul semua
         wait_ready(driver)
         
-        print("\n  📋  Input Controls ...")
+        # Isi tanggal (Pastikan memanggil fill_date_v74 dengan 4 argumen)
+        fill_date_v77(driver, "Start Date", 0, ST_DATE) 
+        time.sleep(2)
+        fill_date_v77(driver, "End Date",   1, EN_DATE) 
+        time.sleep(2)
         
-        # Gunakan fill_date_v74 (4 argumen) yang sudah diperbaiki di Cell 2
-        fill_date_v74(driver, "Start Date", 0, ST_DATE) 
-        time.sleep(1)
-        fill_date_v74(driver, "End Date",   1, EN_DATE) 
-        time.sleep(1)
+        # Pilih Warehouse
+        select_warehouse_group_v77(driver, "SCM")
         
-        # Pilih Warehouse Group
-        select_warehouse_group_v77(driver, BOT77_WAREHOUSE_GROUP)
-        
-        # Validasi sebelum Apply
+        # Validasi
         so, eo = validate_dates_v77(driver)
         if not so or not eo: 
             print("  ⚠️ Mencoba isi ulang tanggal karena validasi gagal...")
-            fill_date_v74(driver, "Start Date", 0, ST_DATE)
-            fill_date_v74(driver, "End Date",   1, EN_DATE)
+            fill_date_v77(driver, "Start Date", 0, ST_DATE)
+            fill_date_v77(driver, "End Date",   1, EN_DATE)
 
         # 2. Klik Apply & Tunggu Proses yang Sangat Lama
         click_apply_dialog(driver)
@@ -832,7 +826,7 @@ def run_cell4(driver, gc):
         downloaded = export_xlsx(driver)
         
         if downloaded:
-            # Beri nama file unik agar tidak tertabrak Cell 2
+            # Beri nama file unik agar tidak tertabrak Cell 4
             exp  = save_to_export(downloaded, "MTS_Raw_Data_Detail")
             url  = save_to_gsheet(gc, downloaded, "MTS_Raw", "MTS Raw Data Detail")
             bot_footer(exp, url, "MTS_Raw")
