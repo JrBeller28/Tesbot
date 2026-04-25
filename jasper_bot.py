@@ -781,112 +781,107 @@ def run_cell3(driver, gc):
     except Exception as e:
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
-# CELL 4 — Monitor SJ In Progress IP → tab "IP"
+# CELL 4 — MTS → tab "MTS2"
 # =============================================================================
 BOT75IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
     "&ParentFolderUri=%2FiDempiere%2FInventory%2FStock"
-    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMonitor_Status_Surat_Jalan___In_Progress__"
+    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMaterial_Transaction_Summary_With_MR___Shipment_Internal__Raw_Data_"
     "&standAlone=true"
 )
+from datetime import datetime
 
-def select_branch_ip(driver):
-    print("  🏢  Branch: pilih item teratas (Jakarta)")
+# 1. Atur Tanggal menjadi HARI INI untuk keduanya
+TODAY_STR = datetime.today().strftime("%Y-%m-%d")
+START_DATE_MTS2 = TODAY_STR
+END_DATE_MTS2   = TODAY_STR
+
+# 2. Fungsi Isi Tanggal
+def fill_date_mts2(driver, label, index, date_value):
+    print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    toggle_clicked = False
-    for sel in ["a.jr-mSingleselect-input", "button.jr-mSingleselect-input", ".jr-mSingleselect-input"]:
+    try: driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    except: pass
+    time.sleep(0.3)
+    
+    inp = None
+    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+    if index < len(inps): inp = inps[index]
+    
+    if not inp:
         try:
-            els = driver.find_elements(By.CSS_SELECTOR, sel)
-            visible = [e for e in els if e.is_displayed()]
-            if visible:
-                el = visible[0]
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el); time.sleep(0.4)
-                r = driver.execute_script("""
-                    var b=arguments[0].getBoundingClientRect();
-                    return {x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)};""", el)
-                do_click(driver, el, r['x'], r['y']); time.sleep(2.5)
-                toggle_clicked = True; break
-        except: continue
-    if not toggle_clicked:
-        try:
-            el = driver.execute_script("return document.elementFromPoint(914,295);")
-            if el: do_click(driver, el, 914, 295); time.sleep(2.5)
+            all_inps = driver.find_elements(By.CSS_SELECTOR, ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
+            if index < len(all_inps): inp = all_inps[index]
         except: pass
-    for attempt in range(3):
-        items = driver.execute_script(r"""
-            var res=[], SKIP=['---','','–','-','*'];
-            var containers=document.querySelectorAll(
-                '.jr-mSingleselect-listbox,.jr-mSingleselect-dropdown,[class*="listbox"],[class*="dropDown"]');
-            containers.forEach(function(c){
-                if(!c.offsetParent) return;
-                c.querySelectorAll('li,a,div[role="option"],span').forEach(function(el){
-                    if(!el.offsetParent) return;
-                    var t=el.textContent.trim();
-                    if(!t||SKIP.indexOf(t)>-1||t.length>80) return;
-                    if(/^[\*\-–\s]+$/.test(t)) return;
-                    var b=el.getBoundingClientRect();
-                    if(b.width<5||b.height<5) return;
-                    res.push({text:t,cx:Math.round(b.left+b.width/2),cy:Math.round(b.top+b.height/2)});
-                });
-            });
-            if(res.length===0){
-                document.querySelectorAll('li').forEach(function(el){
-                    if(!el.offsetParent) return;
-                    var t=el.textContent.trim();
-                    if(!t||SKIP.indexOf(t)>-1||t.length>80) return;
-                    if(/^[\*\-–\s]+$/.test(t)) return;
-                    var b=el.getBoundingClientRect();
-                    if(b.width<5||b.height<5||b.left<480||b.left>970||b.top<190||b.top>710) return;
-                    res.push({text:t,cx:Math.round(b.left+b.width/2),cy:Math.round(b.top+b.height/2)});
-                });
-            }
-            return res;""")
-        if items:
-            first = items[0]; ix, iy = first['cx'], first['cy']
-            print(f"  → Klik: '{first['text']}' ({ix},{iy})")
-            driver.execute_script("""
-                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
-                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,screenX:x,screenY:y,button:0,buttons:0};
-                el.dispatchEvent(new MouseEvent('mouseover',o));
-                el.dispatchEvent(new MouseEvent('mouseenter',o));
-                el.dispatchEvent(new MouseEvent('mousemove',o));""", ix, iy); time.sleep(0.5)
-            driver.execute_script("""
-                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
-                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,screenX:x,screenY:y,button:0,buttons:1};
-                el.dispatchEvent(new MouseEvent('mousedown',o));
-                el.dispatchEvent(new MouseEvent('mouseup',o));
-                el.dispatchEvent(new MouseEvent('click',o));""", ix, iy); time.sleep(1.2)
-            closed = driver.execute_script(r"""
-                var d=document.querySelectorAll('.jr-mSingleselect-listbox,.jr-mSingleselect-dropdown,[class*="listbox"],[class*="dropDown"]');
-                for(var i=0;i<d.length;i++) if(d[i].offsetParent) return false;
-                return true;""")
-            if closed: print(f"  ✅  Branch '{first['text']}' dipilih"); return True
-            val = driver.execute_script(r"""
-                var s=document.querySelectorAll('.jr-mSingleselect-input-selection,[class*="singleSelect"] [class*="value"]');
-                for(var i=0;i<s.length;i++){var t=s[i].textContent.trim(); if(t&&t!=='---') return t;}
-                return '';""")
-            if val and val != '---': print(f"  ✅  Branch: '{val}'"); return True
-        if attempt < 2: time.sleep(1.5)
-    print("  ⚠️  Branch: tidak bisa konfirmasi, lanjut ..."); return True
+        
+    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
+    
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
+    try:
+        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
+        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
+        inp.send_keys(Keys.DELETE);      time.sleep(0.1)
+        inp.send_keys(date_value);       time.sleep(0.3)
+        inp.send_keys(Keys.TAB);         time.sleep(0.5)
+        val = inp.get_attribute('value')
+        
+        # Panggil trigger_events jika ada (skip jika error)
+        if val and val.strip(): 
+            try: trigger_events(driver, inp)
+            except NameError: pass 
+            print(f"  ✅  '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S1: {e}")
+    
+    return False
 
+# 3. Main Function untuk CELL 4
 def run_cell4(driver, gc):
     print("\n" + "="*60)
-    print("  🤖  CELL 4 — BOT v75 IP : Monitor SJ In Progress (IP)")
+    print("  🤖  CELL 4 — MTS 2 (Material Transaction Summary Raw Data)")
     print("="*60)
     try:
         driver.get(BOT75IP_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
-        wait_ready(driver)
+        
+        try: wait_ready(driver)
+        except NameError: pass # Abaikan jika wait_ready tidak terdefinisi di scope ini
+        
         print("\n  📋  Input Controls ...")
-        select_branch_ip(driver); time.sleep(0.8)
+        
+        # Langkah 1: Mengisi HANYA Start Date dan End Date
+        fill_date_mts2(driver, "Start Date", 0, START_DATE_MTS2)
+        fill_date_mts2(driver, "End Date", 1, END_DATE_MTS2)
+        time.sleep(1)
+        
+        # Langkah 2: Langsung klik Apply (Mengabaikan dropdown)
         click_apply_dialog(driver)
-        wait_loading(driver)
+        
+        try: wait_loading(driver)
+        except NameError: pass
+        
         time.sleep(3)
+        
+        # Langkah 3: Export & Upload
         downloaded = export_xlsx(driver)
         if downloaded:
-            exp = save_to_export(downloaded, "MonitorSuratJalan_IP")
-            url = save_to_gsheet(gc, downloaded, "IP", "Monitor SJ IP")
-            bot_footer(exp, url, "IP")
+            exp = save_to_export(downloaded, "MaterialTransactionSummary_MTS2")
+            url = save_to_gsheet(gc, downloaded, "MTS2", "Data MTS2")
+            
+            # =========================================================
+            # TAMBAHAN: UPDATE WAKTU TARIKAN KE GOOGLE SHEET
+            # =========================================================
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("MTS2") 
+                
+                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
+            except Exception as e:
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+            # =========================================================
+            
+            bot_footer(exp, url, "MTS2")
         else:
             print("\n  ⚠️  Download gagal")
     except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
