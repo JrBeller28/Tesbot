@@ -529,6 +529,16 @@ def validate_dates_v74(driver):
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
     return so, eo
+def update_header_timestamp(gc, sheet_name, timestamp):
+    sh = gc.open_by_key("1BTAVmWs-9GZpJcO2Kv2zEtV2jy680wHASboIeArqb9U")
+    ws = sh.worksheet(sheet_name)
+
+    # ✅ Taruh di kanan supaya tidak ganggu data
+    ws.update('F1', f"📊 Last Update: {timestamp}")
+
+    ws.format('F1', {
+        "textFormat": {"bold": True, "fontSize": 12}
+    })
 
 def run_cell2(driver, gc):
 
@@ -558,13 +568,23 @@ def run_cell2(driver, gc):
         wait_loading(driver)
 
         downloaded = export_xlsx(driver)
+
         if downloaded:
+            # ✅ Timestamp hanya dibuat jika sukses
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"\n🕒 Last Update: {timestamp}")
+        
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
-            bot_footer(exp, url, "Data")
+        
+            # ✅ Update header Google Sheets
+            update_header_timestamp(gc, "Data", timestamp)
+        
+            bot_Footer(exp, url, f"Data (Last Update: {timestamp})")
+        
         else:
             print("\n  ⚠️  Download gagal")
-    bot_header(exp, url, f"Data (Last Update: {timestamp})")
+    
     except SystemExit as se: print(f"\n  🛑  {se}")
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
