@@ -571,9 +571,10 @@ def run_cell2(driver, gc):
                 sh = gc.open_by_url(url)
                 worksheet = sh.worksheet("Data")
                 
-                # Menulis di sel Z1 (atau sesuaikan dengan kebutuhan, misal A1)
-                worksheet.update('E3', f"Terakhir Ditarik: {now_str}")
-                print(f"  🕒  Waktu tarikan dicatat di GSheet ({now_str}).")
+                # PERBAIKAN: Menggunakan update_acell agar tidak error 400
+                worksheet.update_acell('E3', f"Terakhir Ditarik: {now_str}")
+                
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel E3 ({now_str}).")
             except Exception as e:
                 print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             # =========================================================
@@ -764,10 +765,13 @@ def run_cell3(driver, gc):
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
                 worksheet = sh.worksheet("IM_IP") # Pastikan nama worksheet sesuai target
-                worksheet.update('C3', f"Terakhir Ditarik: {now_str}")
-                print(f"  🕒  Waktu tarikan dicatat di GSheet sel Z1 ({now_str}).")
+                
+                # PERBAIKAN: Menggunakan update_acell agar tidak error 400
+                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
+                
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
             except Exception as e:
-                pass
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             # ---------------------------------------
             
             bot_footer(exp, url, "IM_IP")
