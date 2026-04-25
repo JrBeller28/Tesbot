@@ -572,7 +572,7 @@ def run_cell2(driver, gc):
                 worksheet = sh.worksheet("Data")
                 
                 # Menulis di sel Z1 (atau sesuaikan dengan kebutuhan, misal A1)
-                worksheet.update('Z1', f"Terakhir Ditarik: {now_str}")
+                worksheet.update('E3', f"Terakhir Ditarik: {now_str}")
                 print(f"  🕒  Waktu tarikan dicatat di GSheet ({now_str}).")
             except Exception as e:
                 print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
@@ -758,6 +758,18 @@ def run_cell3(driver, gc):
         if downloaded:
             exp = save_to_export(downloaded, "InventoryMove_InProgress")
             url = save_to_gsheet(gc, downloaded, "IM_IP", "Inventory Move In Progress")
+            
+            # --- Update langsung ke Google Sheet ---
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("IM_IP") # Pastikan nama worksheet sesuai target
+                worksheet.update('C3', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel Z1 ({now_str}).")
+            except Exception as e:
+                pass
+            # ---------------------------------------
+            
             bot_footer(exp, url, "IM_IP")
         else:
             print("\n  ⚠️  Download gagal")
