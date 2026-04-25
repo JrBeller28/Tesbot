@@ -382,9 +382,6 @@ BOT74_REPORT_URL = (
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
 from datetime import datetime
-WebDriverWait(driver, 20).until(
-    EC.presence_of_element_located((By.CSS_SELECTOR, "input.date.hasDatepicker"))
-)
 
 START_DATE = "2025-07-01"
 END_DATE   = datetime.today().strftime("%Y-%m-%d")
@@ -392,97 +389,50 @@ END_DATE   = datetime.today().strftime("%Y-%m-%d")
 def fill_date_v74(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-
-    try:
-        driver.execute_script(
-            "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';"
-        )
-    except:
-        pass
-
+    try: driver.execute_script(
+        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    except: pass
     time.sleep(0.3)
-
     inp = None
-
-    # ✅ Tunggu input muncul
-    inps = WebDriverWait(driver, 15).until(
-        EC.presence_of_all_elements_located(
-            (By.CSS_SELECTOR, "input.date.hasDatepicker")
-        )
-    )
-
-    if len(inps) > index:
-        inp = inps[index]
-
-    # fallback
+    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+    if index < len(inps): inp = inps[index]
     if not inp:
         try:
-            all_inps = driver.find_elements(
-                By.CSS_SELECTOR,
-                ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']"
-            )
-            if len(all_inps) > index:
-                inp = all_inps[index]
-        except:
-            pass
-
-    if not inp:
-        print(f"  ❌  Input index {index} tidak ditemukan!")
-        return False
-
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
-    time.sleep(0.4)
-
+            all_inps = driver.find_elements(By.CSS_SELECTOR,
+                ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
+            if index < len(all_inps): inp = all_inps[index]
+        except: pass
+    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
     try:
-        ActionChains(driver).move_to_element(inp).click().perform()
-        inp.send_keys(Keys.CONTROL + "a")
-        inp.send_keys(Keys.DELETE)
-        inp.send_keys(date_value)
-        inp.send_keys(Keys.TAB)
-
-        time.sleep(0.5)
-
+        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
+        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
+        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
+        inp.send_keys(date_value);       time.sleep(0.3)
+        inp.send_keys(Keys.TAB);        time.sleep(0.5)
         val = inp.get_attribute('value')
-        if val and val.strip():
-            trigger_events(driver, inp)
-            print(f"  ✅  '{val}'")
-            return True
-
-    except Exception as e:
-        print(f"  ⚠️  S1: {e}")
-
+        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S1: {e}")
     try:
         driver.execute_script("""
             var el=arguments[0],v=arguments[1];
             var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
             s.call(el,v); el.value=v;
             ['focus','input','change','blur'].forEach(function(e){
-                el.dispatchEvent(new Event(e,{bubbles:true}));
-            });
+                el.dispatchEvent(new Event(e,{bubbles:true}));});
             el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, date_value)
-
-        time.sleep(0.5)
-
+        """, inp, TODAY_STR); time.sleep(0.5)
         val = inp.get_attribute('value')
-        if val and val.strip():
-            print(f"  ✅  JS '{val}'")
-            return True
-
-    except Exception as e:
-        print(f"  ⚠️  S2: {e}")
-
-    print(f"  ❌  {label} GAGAL!")
-    return False
+        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S2: {e}")
+    print(f"  ❌  {label} GAGAL!"); return False
 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
         # 1. Scroll ke elemen dropdown
-        wg = WebDriverWait(driver, 15).until(
-    EC.presence_of_element_located((By.ID, "WarehouseGroup"))
-)
+        wg = driver.find_element(By.ID, "WarehouseGroup")
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg)
         time.sleep(0.8)
 
@@ -579,16 +529,6 @@ def validate_dates_v74(driver):
     so, eo = bool(sv), bool(ev)
     print(f"  🔍  Validasi: Start='{sv}' {'✅' if so else '❌'}  End='{ev}' {'✅' if eo else '❌'}")
     return so, eo
-def update_header_timestamp(gc, sheet_name, timestamp):
-    sh = gc.open_by_key("1BTAVmWs-9GZpJcO2Kv2zEtV2jy680wHASboIeArqb9U")
-    ws = sh.worksheet(sheet_name)
-
-    # ✅ Taruh di kanan supaya tidak ganggu data
-    ws.update('F1', f"📊 Last Update: {timestamp}")
-
-    ws.format('F1', {
-        "textFormat": {"bold": True, "fontSize": 12}
-    })
 
 def run_cell2(driver, gc):
 
@@ -599,6 +539,8 @@ def run_cell2(driver, gc):
     try:
 
         driver.get(BOT74_REPORT_URL)
+        time.sleep(25)
+
         wait_ready(driver)
 
         fill_date_v74(driver, "Start Date", 0, START_DATE)
@@ -616,24 +558,12 @@ def run_cell2(driver, gc):
         wait_loading(driver)
 
         downloaded = export_xlsx(driver)
-
         if downloaded:
-            # ✅ Timestamp hanya dibuat jika sukses
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"\n🕒 Last Update: {timestamp}")
-        
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
-        
-                       # ✅ Update header Google Sheets
-            update_header_timestamp(gc, "Data", timestamp)
-            
-            # ✅ Call footer (FIX)
-            bot_footer(exp, url, f"Data (Last Update: {timestamp})")
-        
+            bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
-    
     except SystemExit as se: print(f"\n  🛑  {se}")
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
