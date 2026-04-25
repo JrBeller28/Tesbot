@@ -564,6 +564,7 @@ def run_cell2(driver, gc):
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
+    bot_header(exp, url, f"Data (Last Update: {timestamp})")
     except SystemExit as se: print(f"\n  🛑  {se}")
     except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
