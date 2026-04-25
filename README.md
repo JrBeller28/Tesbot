@@ -57,8 +57,8 @@ Tambahkan secret-secret ini:
 
 | Nama Secret | Nilai |
 |---|---|
-| `JASPER_USERNAME` | `agus.widodo` |
-| `JASPER_PASSWORD` | `kampret99` |
+| `JASPER_USERNAME` | `muhammad.prasetyo` |
+| `JASPER_PASSWORD` | `Adminhqacc12` |
 | `JASPER_BASE_URL` | `http://report.tangki.id/jasperserver` |
 | `GSHEET_ID` | `1DPIh2FZBAFXCaj_AbsXiMR1qSBmt4QXcp4kQ8iZXTGg` |
 | `GSHEET_CREDENTIALS_B64` | *(paste string base64 dari langkah 2)* |
