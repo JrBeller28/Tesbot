@@ -561,6 +561,23 @@ def run_cell2(driver, gc):
         if downloaded:
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
+            
+            # =========================================================
+            # TAMBAHAN: UPDATE CELL TERTENTU DI GOOGLE SHEET
+            # =========================================================
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Asumsi url adalah link Spreadsheet dan sheet target bernama "Data"
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("Data")
+                
+                # Menulis di sel Z1 (atau sesuaikan dengan kebutuhan, misal A1)
+                worksheet.update('Z1', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet ({now_str}).")
+            except Exception as e:
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+            # =========================================================
+
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
