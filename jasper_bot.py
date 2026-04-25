@@ -394,7 +394,12 @@ def fill_date_v74(driver, label, index, date_value):
     except: pass
     time.sleep(0.3)
     inp = None
-    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+    from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+inps = WebDriverWait(driver, 15).until(
+    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "input.date.hasDatepicker"))
+)
     if index < len(inps): inp = inps[index]
     if not inp:
         try:
@@ -432,7 +437,9 @@ def select_warehouse_group_v74(driver, item_text):
     driver.switch_to.default_content()
     try:
         # 1. Scroll ke elemen dropdown
-        wg = driver.find_element(By.ID, "WarehouseGroup")
+        wg = WebDriverWait(driver, 15).until(
+    EC.presence_of_element_located((By.ID, "WarehouseGroup"))
+)
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg)
         time.sleep(0.8)
 
