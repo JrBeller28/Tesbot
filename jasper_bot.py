@@ -412,10 +412,13 @@ END_DATE   = datetime.today().strftime("%Y-%m-%d")
 def fill_date_v74(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    
+    # Matikan paksa kalender popup agar tidak menimpa nilai
+    try: 
+        driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
+    
     inp = None
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
     if index < len(inps): inp = inps[index]
@@ -425,41 +428,59 @@ def fill_date_v74(driver, label, index, date_value):
                 ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
             if index < len(all_inps): inp = all_inps[index]
         except: pass
-    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
+    
+    if not inp: 
+        print(f"  ❌  Input index {index} tidak ditemukan!")
+        return False
+        
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
+    time.sleep(0.4)
+    
     try:
         ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
         inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
+        inp.send_keys(Keys.DELETE);      time.sleep(0.1)
         inp.send_keys(date_value);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);        time.sleep(0.5)
+        inp.send_keys(Keys.TAB);         time.sleep(0.5)
         val = inp.get_attribute('value')
-        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S1: {e}")
+        if val and val.strip(): 
+            trigger_events(driver, inp)
+            print(f"  ✅  '{val}'")
+            return True
+    except Exception as e: 
+        print(f"  ⚠️  S1: {e}")
+        
     try:
+        # PERBAIKAN: Menggunakan date_value, bukan TODAY_STR
         driver.execute_script("""
             var el=arguments[0],v=arguments[1];
             var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-            s.call(el,v); el.value=v;
+            if(s) s.call(el,v); 
+            el.value=v;
             ['focus','input','change','blur'].forEach(function(e){
                 el.dispatchEvent(new Event(e,{bubbles:true}));});
             el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, TODAY_STR); time.sleep(0.5)
+        """, inp, date_value) 
+        time.sleep(0.5)
+        
         val = inp.get_attribute('value')
-        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S2: {e}")
-    print(f"  ❌  {label} GAGAL!"); return False
+        if val and val.strip(): 
+            print(f"  ✅  JS '{val}'")
+            return True
+    except Exception as e: 
+        print(f"  ⚠️  S2: {e}")
+        
+    print(f"  ❌  {label} GAGAL!")
+    return False
 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
-        # 1. Scroll ke elemen dropdown
         wg = driver.find_element(By.ID, "WarehouseGroup")
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg)
         time.sleep(0.8)
 
-        # 2. Klik toggle untuk buka dropdown
         toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
         tr = driver.execute_script("""
             var r=arguments[0].getBoundingClientRect();
@@ -468,11 +489,9 @@ def select_warehouse_group_v74(driver, item_text):
         do_click(driver, toggle, tr['x'], tr['y'])
         time.sleep(2.5)
 
-        # 3. Coba klik item (max 3 percobaan)
         for attempt in range(3):
             print(f"    attempt {attempt+1}: mencari '{item_text}'...")
 
-            # Cari elemen dengan text exact match
             match_el = driver.execute_script("""
                 var txt = arguments[0];
                 var found = null;
@@ -489,8 +508,7 @@ def select_warehouse_group_v74(driver, item_text):
                         if (el.textContent.trim() !== txt) continue;
                         var r = el.getBoundingClientRect();
                         if (r.width > 0 && r.height > 0 && r.top > 0 && r.top < 1080) {
-                            found = el;
-                            break;
+                            found = el; break;
                         }
                     }
                     if (found) break;
@@ -505,22 +523,16 @@ def select_warehouse_group_v74(driver, item_text):
 
             print(f"    ✔️  Elemen ditemukan, mencoba klik...")
 
-            # Dispatch full mouse event sequence (paling kompatibel dengan semua framework)
             driver.execute_script("""
                 var el = arguments[0];
                 el.scrollIntoView({block:'center'});
                 ['mouseover','mouseenter','mousemove','mousedown','mouseup','click'].forEach(function(evtName) {
-                    var evt = new MouseEvent(evtName, {
-                        bubbles: true,
-                        cancelable: true,
-                        view: window
-                    });
+                    var evt = new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window });
                     el.dispatchEvent(evt);
                 });
             """, match_el)
             time.sleep(1.5)
 
-            # Verifikasi
             val = driver.execute_script("""
                 var s = document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
                 return s ? s.textContent.trim() : '---';
@@ -542,9 +554,13 @@ def select_warehouse_group_v74(driver, item_text):
 
 def validate_dates_v74(driver):
     driver.switch_to.default_content()
+    # PERBAIKAN: Fallback selector jika class hasDatepicker hilang
     result = driver.execute_script(r"""
         var d={sv:'',ev:''};
         var inps=document.querySelectorAll('input.date.hasDatepicker');
+        if(inps.length < 2) {
+            inps = document.querySelectorAll('.jr-mDialog input[type="text"], [class*="dialog"] input[type="text"]');
+        }
         if(inps[0]) d.sv=inps[0].value.trim();
         if(inps[1]) d.ev=inps[1].value.trim();
         return d;""")
@@ -554,16 +570,13 @@ def validate_dates_v74(driver):
     return so, eo
 
 def run_cell2(driver, gc):
-
     print("\n" + "="*60)
     print("🤖 CELL 2 — BOT v74")
     print("="*60)
 
     try:
-
         driver.get(BOT74_REPORT_URL)
         time.sleep(25)
-
         wait_ready(driver)
 
         fill_date_v74(driver, "Start Date", 0, START_DATE)
@@ -577,7 +590,6 @@ def run_cell2(driver, gc):
             raise SystemExit("VALIDASI TANGGAL GAGAL")
 
         click_apply_dialog(driver)
-
         wait_loading(driver)
 
         downloaded = export_xlsx(driver)
@@ -585,28 +597,23 @@ def run_cell2(driver, gc):
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
             
-            # =========================================================
-            # TAMBAHAN: UPDATE CELL TERTENTU DI GOOGLE SHEET
-            # =========================================================
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # Asumsi url adalah link Spreadsheet dan sheet target bernama "Data"
                 sh = gc.open_by_url(url)
                 worksheet = sh.worksheet("Data")
-                
-                # PERBAIKAN: Menggunakan update_acell agar tidak error 400
                 worksheet.update_acell('E3', f"Terakhir Ditarik: {now_str}")
-                
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel E3 ({now_str}).")
             except Exception as e:
                 print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            # =========================================================
 
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
-    except SystemExit as se: print(f"\n  🛑  {se}")
-    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+            
+    except SystemExit as se: 
+        print(f"\n  🛑  {se}")
+    except Exception as e:   
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
 # CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
