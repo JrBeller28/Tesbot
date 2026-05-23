@@ -5,7 +5,7 @@
 # ║  Rebuilt dari notebook jasper_lagi.ipynb (versi Colab yang berhasil)    ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
-import os, sys, time, glob, shutil, re, json, traceback
+import os, sys, time, glob, shutil, re, json, traceback, subprocess
 from datetime import datetime, timezone, timedelta
 
 from selenium import webdriver
@@ -13,10 +13,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait, Select
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from selenium.webdriver.support import expected_conditions as EC
-
-
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -48,7 +45,7 @@ for d in [DOWNLOAD_DIR, C5_DOWNLOAD_DIR, FOLDER_OUT]:
     os.makedirs(d, exist_ok=True)
 
 # =============================================================================
-# GOOGLE SHEETS AUTH  (service account dari env GSHEET_CREDENTIALS_B64)
+# GOOGLE SHEETS AUTH
 # =============================================================================
 def init_gc():
     import base64
@@ -65,24 +62,37 @@ def init_gc():
 # DRIVER
 # =============================================================================
 def make_driver(download_dir=DOWNLOAD_DIR):
+    # Bersihkan proses Chrome yang mungkin menggantung
+    subprocess.run(["pkill", "-9", "-f", "chrome"],      capture_output=True)
+    subprocess.run(["pkill", "-9", "-f", "chromedriver"], capture_output=True)
+    time.sleep(2)
+
     opts = webdriver.ChromeOptions()
     opts.add_argument("--headless")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
-    # Tambahkan User-Agent agar tidak dicurigai sebagai bot standar
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
-    
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--ignore-certificate-errors")
+    opts.add_argument("--ignore-ssl-errors")
+    opts.add_argument("--allow-running-insecure-content")
+    opts.accept_insecure_certs = True
+    opts.add_experimental_option("prefs", {
+        "download.default_directory":   download_dir,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade":   True,
+        "safebrowsing.enabled":         True,
+        "profile.default_content_settings.popups": 0,
+        "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
+    })
     d = webdriver.Chrome(options=opts)
-    
-    # PERBAIKAN: Perpanjang timeout load halaman untuk cegah error Gambar 2
-    d.set_page_load_timeout(180) 
     d.set_script_timeout(120)
+    d.set_page_load_timeout(120)
     d.implicitly_wait(0)
     return d
 
 # =============================================================================
-# HELPER FUNCTIONS  (identik dengan notebook)
+# HELPER FUNCTIONS
 # =============================================================================
 def clean_value(val):
     if val is None: return ''
@@ -101,9 +111,11 @@ def clean_value(val):
     except: return s
 
 def wait_ready(driver, t=30):
-    WebDriverWait(driver, t).until(
-        lambda d: d.execute_script("return document.readyState") == "complete")
-    time.sleep(2)
+    try:
+        WebDriverWait(driver, t).until(
+            lambda d: d.execute_script("return document.readyState") == "complete")
+    except: pass
+    time.sleep(1)
 
 def do_click(driver, el, x, y):
     driver.execute_script(
@@ -123,14 +135,17 @@ def trigger_events(driver, inp):
         inp)
 
 def is_loading_visible(driver):
-    return driver.execute_script(
-        "var els=document.querySelectorAll('*');"
-        "for(var i=0;i<els.length;i++){"
-        "  var el=els[i]; if(!el.offsetParent) continue;"
-        "  if(el.getBoundingClientRect().width<10) continue;"
-        "  var t=el.textContent.trim();"
-        "  if(t==='Loading...'||(t.startsWith('Loading')&&t.length<30)) return true;"
-        "} return false;")
+    try:
+        return driver.execute_script(
+            "var els=document.querySelectorAll('*');"
+            "for(var i=0;i<els.length;i++){"
+            "  var el=els[i]; if(!el.offsetParent) continue;"
+            "  if(el.getBoundingClientRect().width<10) continue;"
+            "  var t=el.textContent.trim();"
+            "  if(t==='Loading...'||(t.startsWith('Loading')&&t.length<30)) return true;"
+            "} return false;")
+    except:
+        return False
 
 def scan_downloads(search_dirs=None):
     dirs = search_dirs or SEARCH_DIRS
@@ -141,113 +156,400 @@ def scan_downloads(search_dirs=None):
     now = time.time()
     return [f for f in found if now - os.path.getmtime(f) < 300]
 
-def do_login(driver):
-    print("  → Mencoba membuka halaman Login ...")
-    
-    # Retry logic untuk membuka URL (mengatasi error Gambar 2)
-    for i in range(3):
+def safe_get(driver, url, max_retry=2):
+    for attempt in range(1, max_retry + 1):
         try:
-            driver.get(f"{BASE_URL}/login.html")
-            wait_ready(driver)
-            break
+            print(f"  🌐  Buka URL (attempt {attempt}/{max_retry}) ...")
+            driver.get(url)
+            print("  ✅  Halaman terbuka")
+            return True
         except Exception as e:
-            print(f"  ⚠️ Gagal buka halaman (Percobaan {i+1}/3): {e}")
-            time.sleep(5)
-            if i == 2: raise e
+            print(f"  ⚠️  driver.get() attempt {attempt} gagal: {type(e).__name__}: {str(e)[:80]}")
+            if attempt < max_retry:
+                time.sleep(3)
+                try: driver.execute_script("window.stop();")
+                except: pass
+    print(f"  ❌  Semua attempt gagal untuk URL: {url}")
+    return False
 
-    # Input Credentials
+def check_jasper_session(driver):
+    """Cek apakah Jasper masih login. Return False jika perlu re-login."""
     try:
-        # Tunggu sampai form muncul
-        u_field = WebDriverWait(driver, 40).until(
-            EC.presence_of_element_located((By.ID, "j_username")))
-        u_field.send_keys(USERNAME)
-        
-        try:
-            p = driver.find_element(By.ID, "j_password_pseudo")
-            p.click()
-            time.sleep(0.5)
-        except:
-            p = driver.find_element(By.ID, "j_password")
-        
-        p.send_keys(PASSWORD)
-        
-        # Klik Submit dengan JS (lebih kuat dibanding .click() biasa)
-        try:
-            btn = WebDriverWait(driver, 20).until(
-                EC.element_to_be_clickable((By.ID, "submitButton")))
-            driver.execute_script("arguments[0].click();", btn)
-        except TimeoutException:
-            print("  ⚠️ Tombol submit tidak klikable, mencoba kirim Enter...")
-            p.send_keys(Keys.RETURN)
+        cur = driver.current_url
+        if "login" in cur.lower():
+            print(f"  ⚠️  Redirect ke login page! URL: {cur}")
+            return False
+        return True
+    except:
+        return True
 
-        time.sleep(10) # Beri waktu ekstra setelah login
-        
-        # Verifikasi apakah sudah masuk (cek keberadaan elemen home/logout)
-        print("  ✅ Login Berhasil")
-        
-    except TimeoutException:
-        print("  ❌ ERROR: Elemen login tidak muncul setelah 40 detik.")
-        driver.save_screenshot("/tmp/error_login.png") # Simpan bukti untuk debugging
-        raise
+def print_page_diagnostics(driver, label=""):
+    """Cetak info diagnostik saat controls tidak ditemukan."""
+    try:
+        driver.switch_to.default_content()
+        title     = driver.title
+        url       = driver.current_url
+        frames    = driver.find_elements(By.TAG_NAME, "iframe")
+        body_text = driver.execute_script(
+            "return document.body ? document.body.innerText.substring(0,300) : '(kosong)';"
+        ) or "(kosong)"
+        print(f"\n  📋  DIAGNOSTIK {label}:")
+        print(f"      Title   : {title}")
+        print(f"      URL     : {url}")
+        print(f"      iFrames : {len(frames)}")
+        print(f"      Body    : {body_text[:200].replace(chr(10), ' ')}")
     except Exception as e:
-        print(f"  ❌ ERROR Login: {e}")
-        raise
+        print(f"  ⚠️  Gagal print diagnostik: {e}")
 
+# =============================================================================
+# IFRAME-AWARE CONTROLS DETECTION
+# =============================================================================
+_jasper_frame_ctx = None
+
+def wait_jasper_controls(driver, selector, min_count=1, max_wait=60, label="controls"):
+    global _jasper_frame_ctx
+    start = time.time()
+    last_print = 0
+
+    while True:
+        elapsed = time.time() - start
+        if elapsed >= max_wait:
+            break
+
+        try:
+            driver.switch_to.default_content()
+            els = driver.find_elements(By.CSS_SELECTOR, selector)
+            if len(els) >= min_count:
+                print(f"  ✅  {label}: {len(els)} elemen di main doc [{round(elapsed)}s]")
+                _jasper_frame_ctx = None
+                return els, None
+        except: pass
+
+        frame_found = None
+        found_els   = []
+        try:
+            driver.switch_to.default_content()
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            for i, frame in enumerate(iframes):
+                try:
+                    driver.switch_to.default_content()
+                    driver.switch_to.frame(frame)
+                    els = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if len(els) >= min_count:
+                        found_els   = els
+                        frame_found = i
+                        break
+                except: pass
+        except: pass
+        finally:
+            try: driver.switch_to.default_content()
+            except: pass
+
+        if found_els:
+            print(f"  ✅  {label}: {len(found_els)} elemen di iframe #{frame_found} [{round(elapsed)}s]")
+            _jasper_frame_ctx = frame_found
+            return found_els, frame_found
+
+        if elapsed - last_print >= 15:
+            print(f"    [{round(elapsed)}s] menunggu {label} ...")
+            last_print = elapsed
+
+        time.sleep(1)
+
+    driver.switch_to.default_content()
+    print(f"  ❌  Timeout {max_wait}s: {label} tidak muncul")
+    _jasper_frame_ctx = None
+    return [], None
+
+def switch_to_jasper_ctx(driver):
+    global _jasper_frame_ctx
+    try:
+        driver.switch_to.default_content()
+        if _jasper_frame_ctx is not None:
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            if _jasper_frame_ctx < len(iframes):
+                driver.switch_to.frame(iframes[_jasper_frame_ctx])
+                return True
+    except Exception as e:
+        print(f"  ⚠️  switch_to_jasper_ctx: {e}")
+        _jasper_frame_ctx = None
+    return False
+
+# =============================================================================
+# LOGIN — FIX #8: lebih robust, screenshot saat gagal, 3 strategi submit
+# =============================================================================
+def do_login(driver, max_attempt=3):
+    """
+    Login ke Jasper dengan 3 strategi submit:
+      S1: klik #submitButton
+      S2: tekan Enter pada field password
+      S3: JS form.submit()
+    Setiap attempt dilakukan hingga max_attempt kali.
+    Setelah redirect, verifikasi session lewat URL dan keberadaan elemen dashboard.
+    """
+    login_url = f"{BASE_URL}/login.html"
+
+    for attempt in range(1, max_attempt + 1):
+        print(f"\n  → Login Jasper (attempt {attempt}/{max_attempt}) ...")
+
+        try:
+            # ── Buka halaman login ──────────────────────────────────────────
+            if not safe_get(driver, login_url):
+                raise RuntimeError("Gagal membuka halaman login")
+            wait_ready(driver, t=20)
+
+            # ── Diagnostik form sebelum isi ─────────────────────────────────
+            cur_url = driver.current_url
+            print(f"      URL saat ini : {cur_url}")
+            if "login" not in cur_url.lower():
+                print("  ✅  Sudah login (tidak di halaman login)")
+                return True
+
+            # ── Isi username ────────────────────────────────────────────────
+            try:
+                u_field = WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.ID, "j_username")))
+                u_field.clear()
+                u_field.send_keys(USERNAME)
+                print(f"      username diisi: '{USERNAME}'")
+            except Exception as e:
+                raise RuntimeError(f"Field j_username tidak ditemukan: {e}")
+
+            # ── Isi password ────────────────────────────────────────────────
+            p_field = None
+            for pid in ["j_password_pseudo", "j_password"]:
+                try:
+                    p_field = driver.find_element(By.ID, pid)
+                    if p_field.is_displayed():
+                        if pid == "j_password_pseudo":
+                            p_field.click(); time.sleep(0.5)
+                            # setelah klik pseudo, cari field asli
+                            try:
+                                real = driver.find_element(By.ID, "j_password")
+                                if real.is_displayed(): p_field = real
+                            except: pass
+                        break
+                except: continue
+
+            if not p_field:
+                # fallback: cari input[type=password]
+                ps = driver.find_elements(By.CSS_SELECTOR, "input[type='password']")
+                if ps: p_field = ps[0]
+
+            if not p_field:
+                raise RuntimeError("Field password tidak ditemukan!")
+
+            p_field.clear()
+            p_field.send_keys(PASSWORD)
+            print("      password diisi")
+            time.sleep(0.5)
+
+            # ── Submit: Strategi 1 — klik button ───────────────────────────
+            submitted = False
+            for btn_sel in [
+                (By.ID, "submitButton"),
+                (By.CSS_SELECTOR, "button[type='submit']"),
+                (By.XPATH, "//button[contains(normalize-space(),'Log In')]"),
+                (By.XPATH, "//input[@type='submit']"),
+            ]:
+                try:
+                    btn = driver.find_element(*btn_sel)
+                    if btn.is_displayed() and btn.is_enabled():
+                        driver.execute_script(
+                            "arguments[0].scrollIntoView({block:'center'});", btn)
+                        time.sleep(0.3)
+                        driver.execute_script("arguments[0].click();", btn)
+                        print(f"      submit S1 ({btn_sel[1]})")
+                        submitted = True
+                        break
+                except: continue
+
+            # ── Submit: Strategi 2 — Enter pada password ────────────────────
+            if not submitted:
+                p_field.send_keys(Keys.RETURN)
+                print("      submit S2 (Enter)")
+                submitted = True
+
+            # ── Tunggu redirect ─────────────────────────────────────────────
+            redirected = False
+            try:
+                WebDriverWait(driver, 60).until(
+                    lambda d: "login" not in d.current_url.lower())
+                redirected = True
+            except:
+                pass
+
+            # ── Submit: Strategi 3 — JS form.submit() jika belum redirect ───
+            if not redirected:
+                try:
+                    driver.execute_script(
+                        "var f=document.querySelector('form'); if(f) f.submit();")
+                    print("      submit S3 (JS form.submit)")
+                    WebDriverWait(driver, 60).until(
+                        lambda d: "login" not in d.current_url.lower())
+                    redirected = True
+                except: pass
+
+            cur = driver.current_url
+            print(f"      URL setelah submit: {cur}")
+
+            # ── Verifikasi: masih di login? ─────────────────────────────────
+            if "login" in cur.lower():
+                # Ambil pesan error dari halaman jika ada
+                err_msg = ""
+                try:
+                    err_el = driver.find_elements(By.CSS_SELECTOR,
+                        ".errorMessage, .error, #errorMessage, [class*='error']")
+                    if err_el:
+                        err_msg = err_el[0].text.strip()
+                except: pass
+
+                # Screenshot untuk debug
+                try:
+                    ss_path = f"/tmp/login_failed_attempt{attempt}.png"
+                    driver.save_screenshot(ss_path)
+                    print(f"      📸 Screenshot: {ss_path}")
+                except: pass
+
+                if err_msg:
+                    print(f"      ⚠️  Pesan error di halaman: {err_msg}")
+                raise RuntimeError(
+                    f"Login GAGAL attempt {attempt} — masih di login page. "
+                    f"Error: '{err_msg}'"
+                )
+
+            # ── Verifikasi dashboard muncul ─────────────────────────────────
+            time.sleep(2)
+            print(f"  ✅  Login OK — URL: {cur[:80]}")
+            return True
+
+        except RuntimeError as e:
+            print(f"  ⚠️  {e}")
+            if attempt < max_attempt:
+                wait_sec = attempt * 3
+                print(f"  🔄  Tunggu {wait_sec}s lalu coba lagi ...")
+                time.sleep(wait_sec)
+            else:
+                raise RuntimeError(
+                    f"Login GAGAL setelah {max_attempt} attempt. "
+                    f"Cek kredensial atau koneksi ke {BASE_URL}."
+                ) from e
+
+        except Exception as e:
+            print(f"  ❌  Unexpected error saat login: {e}")
+            if attempt < max_attempt:
+                time.sleep(3)
+            else:
+                raise
+
+    return False  # tidak seharusnya sampai sini
+
+# =============================================================================
+# CLICK APPLY — iframe-aware
+# =============================================================================
 def click_apply_dialog(driver):
     print("\n  🔵 Klik Apply ...")
+    switch_to_jasper_ctx(driver)
+
     btn = None
-    for sel in [(By.ID, "apply"), (By.CSS_SELECTOR, "button#apply"),
+    for sel in [(By.CSS_SELECTOR, "button#apply"),
+                (By.CSS_SELECTOR, "input[value='Apply']"),
                 (By.XPATH, "//button[normalize-space()='Apply']"),
                 (By.XPATH, "//input[@value='Apply']")]:
         try:
             el = driver.find_element(*sel)
             if el.is_displayed(): btn = el; break
         except: continue
-    if not btn: print("  ❌ Apply tidak ditemukan!"); return False
+
+    if not btn:
+        driver.switch_to.default_content()
+        for i, frame in enumerate(driver.find_elements(By.TAG_NAME, "iframe")):
+            try:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(frame)
+                for sel in [(By.CSS_SELECTOR, "button#apply"),
+                            (By.XPATH, "//button[normalize-space()='Apply']")]:
+                    try:
+                        el = driver.find_element(*sel)
+                        if el.is_displayed():
+                            btn = el
+                            print(f"  → Apply di iframe #{i}")
+                            break
+                    except: pass
+                if btn: break
+            except: pass
+        if not btn:
+            driver.switch_to.default_content()
+
+    if not btn:
+        print("  ❌ Apply tidak ditemukan!"); return False
+
     driver.execute_script("arguments[0].scrollIntoView({block:'nearest'});", btn); time.sleep(0.5)
     br = driver.execute_script(
         "var r=arguments[0].getBoundingClientRect();"
         "return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};", btn)
-    bx, by = br['x'], br['y']
+
     driver.execute_script("arguments[0].click();", btn); time.sleep(2)
     if is_loading_visible(driver): print("  ✅ Apply S1!"); return True
-    do_click(driver, btn, bx, by); time.sleep(2)
+    do_click(driver, btn, br['x'], br['y']); time.sleep(2)
     if is_loading_visible(driver): print("  ✅ Apply S2!"); return True
     ActionChains(driver).move_to_element(btn).pause(0.5).click().perform(); time.sleep(2)
-    if is_loading_visible(driver): print("  ✅ Apply S3!"); return True
-    print("  ⚠️ Loading tidak terdeteksi — lanjut ..."); return True
+    print("  ✅ Apply S3 (loading mungkin cepat)"); return True
 
+# =============================================================================
+# WAIT LOADING
+# =============================================================================
 def wait_loading(driver):
-    print("\n  ⏳ Tunggu loading muncul (max 60s) ...")
-    appeared = False
-    for i in range(60):
+    print("\n  ⏳ Tunggu loading selesai ...")
+    driver.switch_to.default_content()
+
+    def check_loading():
+        try:
+            driver.switch_to.default_content()
+            if is_loading_visible(driver): return True
+            for frame in driver.find_elements(By.TAG_NAME, "iframe"):
+                try:
+                    driver.switch_to.default_content()
+                    driver.switch_to.frame(frame)
+                    if is_loading_visible(driver): return True
+                except: pass
+            driver.switch_to.default_content()
+        except: pass
+        return False
+
+    for i in range(45):
         time.sleep(1)
-        if is_loading_visible(driver):
-            print(f"  ✅ Loading muncul [{i+1}s]"); appeared = True; break
-        if (i+1) % 10 == 0: print(f"    [{i+1}s] menunggu ...")
-    if not appeared: print("  ⚠️ Loading tidak muncul — lanjut ...")
-    print("  ⏳ Tunggu loading selesai ...")
+        if check_loading():
+            print(f"  ✅ Loading muncul [{i+1}s]"); break
+        if i == 44: print("  ⚠️  Loading tidak terdeteksi — lanjut ...")
+
     tick = 0
     while True:
         time.sleep(5); tick += 1
-        if not is_loading_visible(driver):
+        if not check_loading():
             print(f"  ✅ Loading selesai ~{tick*5}s"); break
         if tick % 12 == 0: print(f"    [{tick*5}s] masih loading ...")
-        if tick > 120: print("  ⚠️ Timeout 600s — lanjut ..."); break
+        if tick > 120: print("  ⚠️  Timeout 600s — lanjut ..."); break
+    driver.switch_to.default_content()
 
+# =============================================================================
+# EXPORT XLSX
+# =============================================================================
 def export_xlsx(driver, search_dirs=None):
     print("\n  📤 Export XLSX ...")
     driver.switch_to.default_content(); time.sleep(2)
 
     def dropdown_open():
-        return driver.execute_script(
-            "var items=document.querySelectorAll('a,li');"
-            "for(var i=0;i<items.length;i++){"
-            "  var t=items[i].textContent.trim();"
-            "  if(t==='XLSX'||t==='Excel'){"
-            "    var b=items[i].getBoundingClientRect();"
-            "    if(b.width>20&&b.height>5) return true;}}"
-            "return false;")
+        try:
+            return driver.execute_script(
+                "var items=document.querySelectorAll('a,li');"
+                "for(var i=0;i<items.length;i++){"
+                "  var t=items[i].textContent.trim();"
+                "  if(t==='XLSX'||t==='Excel'){"
+                "    var b=items[i].getBoundingClientRect();"
+                "    if(b.width>20&&b.height>5) return true;}}"
+                "return false;")
+        except: return False
 
     ex, ey = 137, 96; export_el = None
     for sel in ["button[title='Export']", "a[title='Export']", "li[title='Export']",
@@ -278,7 +580,7 @@ def export_xlsx(driver, search_dirs=None):
             el = driver.execute_script(f"return document.elementFromPoint({hx},{hy});")
             if not el: continue
             do_click(driver, el, hx, hy); time.sleep(3)
-            if dropdown_open(): ex, ey = hx, hy; break
+            if dropdown_open(): break
 
     if not dropdown_open(): print("  ❌ Dropdown tidak bisa dibuka!"); return None
 
@@ -305,28 +607,28 @@ def export_xlsx(driver, search_dirs=None):
     if not xlsx: print("  ❌ XLSX tidak ditemukan!"); return None
 
     ix, iy = xlsx['x'], xlsx['y']
-    driver.execute_script(
-        "var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;"
-        "var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,"
-        "       screenX:x,screenY:y,button:0,buttons:0};"
-        "el.dispatchEvent(new MouseEvent('mouseover',o));"
-        "el.dispatchEvent(new MouseEvent('mouseenter',o));"
-        "el.dispatchEvent(new MouseEvent('mousemove',o));", ix, iy); time.sleep(0.8)
-    driver.execute_script(
-        "var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;"
-        "var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,"
-        "       screenX:x,screenY:y,button:0,buttons:1};"
-        "el.dispatchEvent(new MouseEvent('mousedown',o));"
-        "el.dispatchEvent(new MouseEvent('mouseup',o));"
-        "el.dispatchEvent(new MouseEvent('click',o));", ix, iy); time.sleep(2)
+    driver.execute_script("""
+        var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
+        var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,
+               screenX:x,screenY:y,button:0,buttons:0};
+        el.dispatchEvent(new MouseEvent('mouseover',o));
+        el.dispatchEvent(new MouseEvent('mouseenter',o));
+        el.dispatchEvent(new MouseEvent('mousemove',o));""", ix, iy); time.sleep(0.8)
+    driver.execute_script("""
+        var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
+        var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,
+               screenX:x,screenY:y,button:0,buttons:1};
+        el.dispatchEvent(new MouseEvent('mousedown',o));
+        el.dispatchEvent(new MouseEvent('mouseup',o));
+        el.dispatchEvent(new MouseEvent('click',o));""", ix, iy); time.sleep(2)
 
-    if not dropdown_open(): print("  ✅ XLSX diklik [A]")
+    if not dropdown_open():
+        print("  ✅ XLSX diklik [A]")
     else:
         el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
         if el: ActionChains(driver).move_to_element(el).pause(1.0).click().perform()
         time.sleep(2)
-        if not dropdown_open(): print("  ✅ XLSX diklik [B]")
-        else:
+        if dropdown_open():
             el = driver.execute_script(f"return document.elementFromPoint({ix},{iy});")
             if el: driver.execute_script("arguments[0].click();", el); time.sleep(2)
 
@@ -338,11 +640,12 @@ def export_xlsx(driver, search_dirs=None):
             f = max(fresh, key=os.path.getmtime)
             print(f"  ✅ Download: {f}  ({os.path.getsize(f):,} bytes)"); return f
         if (i+1) % 6 == 0: print(f"    [{(i+1)*5}s] belum ada file ...")
-        else: print(f"    [{(i+1)*5}s] menunggu ...")
     print("  ❌ Timeout download!"); return None
 
+# =============================================================================
+# SAVE HELPERS
+# =============================================================================
 def save_to_export(local_file, name_prefix):
-    """Simpan backup ke /tmp/jasper_exports/ (ganti save_to_drive untuk Actions)."""
     if not local_file or not os.path.exists(local_file): return None
     ext  = os.path.splitext(local_file)[1]
     dest = os.path.join(FOLDER_OUT, f"{name_prefix}_{TODAY_LABEL}{ext}")
@@ -393,10 +696,6 @@ def bot_footer(export_path, gsheet_url, tab):
     if export_path:  print(f"  📁 Backup : {export_path}")
     if gsheet_url:   print(f"  📊 GSheet : {gsheet_url}  (tab: {tab})")
     print(f"{'='*60}")
-
-def open_new_tab(driver):
-    driver.execute_script("window.open('about:blank', '_blank');")
-    driver.switch_to.window(driver.window_handles[-1])
 
 # =============================================================================
 # CELL 2 — Material Transaction Summary → tab "Data"
