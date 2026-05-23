@@ -13,7 +13,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait, Select
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from selenium.webdriver.support import expected_conditions as EC
 
 
@@ -70,22 +70,15 @@ def make_driver(download_dir=DOWNLOAD_DIR):
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--ignore-certificate-errors")
-    opts.add_argument("--ignore-ssl-errors")
-    opts.accept_insecure_certs = True
-    opts.add_experimental_option("prefs", {
-        "download.default_directory":   download_dir,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade":   True,
-        "safebrowsing.enabled":         True,
-        "profile.default_content_settings.popups": 0,
-        "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
-    })
+    # Tambahkan User-Agent agar tidak dicurigai sebagai bot standar
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+    
     d = webdriver.Chrome(options=opts)
-    # Beri halaman waktu cukup untuk load (fix ReadTimeoutError)
+    
+    # PERBAIKAN: Perpanjang timeout load halaman untuk cegah error Gambar 2
+    d.set_page_load_timeout(180) 
     d.set_script_timeout(120)
-    d.implicitly_wait(0)           # jangan implicit wait, pakai explicit
+    d.implicitly_wait(0)
     return d
 
 # =============================================================================
@@ -149,35 +142,56 @@ def scan_downloads(search_dirs=None):
     return [f for f in found if now - os.path.getmtime(f) < 300]
 
 def do_login(driver):
-    print("  → Login ...")
-    driver.get(f"{BASE_URL}/login.html")
-    wait_ready(driver)
+    print("  → Mencoba membuka halaman Login ...")
     
-    # Tambahkan wait eksplisit untuk input username agar yakin halaman sudah siap
-    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "j_username")))
-    
-    driver.find_element(By.ID, "j_username").send_keys(USERNAME)
-    
+    # Retry logic untuk membuka URL (mengatasi error Gambar 2)
+    for i in range(3):
+        try:
+            driver.get(f"{BASE_URL}/login.html")
+            wait_ready(driver)
+            break
+        except Exception as e:
+            print(f"  ⚠️ Gagal buka halaman (Percobaan {i+1}/3): {e}")
+            time.sleep(5)
+            if i == 2: raise e
+
+    # Input Credentials
     try:
-        p = driver.find_element(By.ID, "j_password_pseudo")
-        p.click()
-        time.sleep(0.5)
-    except:
-        p = driver.find_element(By.ID, "j_password")
-    
-    p.send_keys(PASSWORD)
-    
-    try:
-        # Gunakan WebDriverWait yang lebih toleran
-        btn = WebDriverWait(driver, 30).until(
-            EC.element_to_be_clickable((By.ID, "submitButton")))
-        driver.execute_script("arguments[0].click();", btn) # Gunakan JS click lebih stabil
-    except TimeoutException:
-        print("  ⚠️ Button tidak ditemukan, mencoba Enter...")
-        p.send_keys(Keys.RETURN)
+        # Tunggu sampai form muncul
+        u_field = WebDriverWait(driver, 40).until(
+            EC.presence_of_element_located((By.ID, "j_username")))
+        u_field.send_keys(USERNAME)
         
-    time.sleep(5)
-    print("  ✅ Login OK")
+        try:
+            p = driver.find_element(By.ID, "j_password_pseudo")
+            p.click()
+            time.sleep(0.5)
+        except:
+            p = driver.find_element(By.ID, "j_password")
+        
+        p.send_keys(PASSWORD)
+        
+        # Klik Submit dengan JS (lebih kuat dibanding .click() biasa)
+        try:
+            btn = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.ID, "submitButton")))
+            driver.execute_script("arguments[0].click();", btn)
+        except TimeoutException:
+            print("  ⚠️ Tombol submit tidak klikable, mencoba kirim Enter...")
+            p.send_keys(Keys.RETURN)
+
+        time.sleep(10) # Beri waktu ekstra setelah login
+        
+        # Verifikasi apakah sudah masuk (cek keberadaan elemen home/logout)
+        print("  ✅ Login Berhasil")
+        
+    except TimeoutException:
+        print("  ❌ ERROR: Elemen login tidak muncul setelah 40 detik.")
+        driver.save_screenshot("/tmp/error_login.png") # Simpan bukti untuk debugging
+        raise
+    except Exception as e:
+        print(f"  ❌ ERROR Login: {e}")
+        raise
 
 def click_apply_dialog(driver):
     print("\n  🔵 Klik Apply ...")
