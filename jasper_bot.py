@@ -13,6 +13,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait, Select
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support import expected_conditions as EC
 
 
@@ -151,19 +152,30 @@ def do_login(driver):
     print("  → Login ...")
     driver.get(f"{BASE_URL}/login.html")
     wait_ready(driver)
+    
+    # Tambahkan wait eksplisit untuk input username agar yakin halaman sudah siap
+    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "j_username")))
+    
     driver.find_element(By.ID, "j_username").send_keys(USERNAME)
+    
     try:
         p = driver.find_element(By.ID, "j_password_pseudo")
         p.click()
         time.sleep(0.5)
     except:
         p = driver.find_element(By.ID, "j_password")
+    
     p.send_keys(PASSWORD)
+    
     try:
-        WebDriverWait(driver, 30).until(
-            EC.element_to_be_clickable((By.ID, "submitButton"))).click()
+        # Gunakan WebDriverWait yang lebih toleran
+        btn = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.ID, "submitButton")))
+        driver.execute_script("arguments[0].click();", btn) # Gunakan JS click lebih stabil
     except TimeoutException:
+        print("  ⚠️ Button tidak ditemukan, mencoba Enter...")
         p.send_keys(Keys.RETURN)
+        
     time.sleep(5)
     print("  ✅ Login OK")
 
