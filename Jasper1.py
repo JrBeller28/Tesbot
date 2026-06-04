@@ -13,9 +13,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait, Select
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from selenium.webdriver.support import expected_conditions as EC
-
-
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -69,22 +68,15 @@ def make_driver(download_dir=DOWNLOAD_DIR):
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--ignore-certificate-errors")
-    opts.add_argument("--ignore-ssl-errors")
-    opts.accept_insecure_certs = True
-    opts.add_experimental_option("prefs", {
-        "download.default_directory":   download_dir,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade":   True,
-        "safebrowsing.enabled":         True,
-        "profile.default_content_settings.popups": 0,
-        "profile.content_settings.exceptions.automatic_downloads.*.setting": 1,
-    })
+    # Tambahkan User-Agent agar tidak dicurigai sebagai bot standar
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+    
     d = webdriver.Chrome(options=opts)
-    # Beri halaman waktu cukup untuk load (fix ReadTimeoutError)
+    
+    # PERBAIKAN: Perpanjang timeout load halaman untuk cegah error Gambar 2
+    d.set_page_load_timeout(180) 
     d.set_script_timeout(120)
-    d.implicitly_wait(0)           # jangan implicit wait, pakai explicit
+    d.implicitly_wait(0)
     return d
 
 # =============================================================================
@@ -148,24 +140,56 @@ def scan_downloads(search_dirs=None):
     return [f for f in found if now - os.path.getmtime(f) < 300]
 
 def do_login(driver):
-    print("  → Login ...")
-    driver.get(f"{BASE_URL}/login.html")
-    wait_ready(driver)
-    driver.find_element(By.ID, "j_username").send_keys(USERNAME)
+    print("  → Mencoba membuka halaman Login ...")
+    
+    # Retry logic untuk membuka URL (mengatasi error Gambar 2)
+    for i in range(3):
+        try:
+            driver.get(f"{BASE_URL}/login.html")
+            wait_ready(driver)
+            break
+        except Exception as e:
+            print(f"  ⚠️ Gagal buka halaman (Percobaan {i+1}/3): {e}")
+            time.sleep(5)
+            if i == 2: raise e
+
+    # Input Credentials
     try:
-        p = driver.find_element(By.ID, "j_password_pseudo")
-        p.click()
-        time.sleep(0.5)
-    except:
-        p = driver.find_element(By.ID, "j_password")
-    p.send_keys(PASSWORD)
-    try:
-        WebDriverWait(driver, 30).until(
-            EC.element_to_be_clickable((By.ID, "submitButton"))).click()
+        # Tunggu sampai form muncul
+        u_field = WebDriverWait(driver, 40).until(
+            EC.presence_of_element_located((By.ID, "j_username")))
+        u_field.send_keys(USERNAME)
+        
+        try:
+            p = driver.find_element(By.ID, "j_password_pseudo")
+            p.click()
+            time.sleep(0.5)
+        except:
+            p = driver.find_element(By.ID, "j_password")
+        
+        p.send_keys(PASSWORD)
+        
+        # Klik Submit dengan JS (lebih kuat dibanding .click() biasa)
+        try:
+            btn = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.ID, "submitButton")))
+            driver.execute_script("arguments[0].click();", btn)
+        except TimeoutException:
+            print("  ⚠️ Tombol submit tidak klikable, mencoba kirim Enter...")
+            p.send_keys(Keys.RETURN)
+
+        time.sleep(10) # Beri waktu ekstra setelah login
+        
+        # Verifikasi apakah sudah masuk (cek keberadaan elemen home/logout)
+        print("  ✅ Login Berhasil")
+        
     except TimeoutException:
-        p.send_keys(Keys.RETURN)
-    time.sleep(5)
-    print("  ✅ Login OK")
+        print("  ❌ ERROR: Elemen login tidak muncul setelah 40 detik.")
+        driver.save_screenshot("/tmp/error_login.png") # Simpan bukti untuk debugging
+        raise
+    except Exception as e:
+        print(f"  ❌ ERROR Login: {e}")
+        raise
 
 def click_apply_dialog(driver):
     print("\n  🔵 Klik Apply ...")
@@ -371,7 +395,6 @@ def bot_footer(export_path, gsheet_url, tab):
 def open_new_tab(driver):
     driver.execute_script("window.open('about:blank', '_blank');")
     driver.switch_to.window(driver.window_handles[-1])
-
 # =============================================================================
 # CELL 2 — Material Transaction Summary → tab "Data"
 # =============================================================================
@@ -389,10 +412,13 @@ END_DATE   = datetime.today().strftime("%Y-%m-%d")
 def fill_date_v74(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    
+    # Matikan paksa kalender popup agar tidak menimpa nilai
+    try: 
+        driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
+    
     inp = None
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
     if index < len(inps): inp = inps[index]
@@ -402,41 +428,59 @@ def fill_date_v74(driver, label, index, date_value):
                 ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
             if index < len(all_inps): inp = all_inps[index]
         except: pass
-    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
+    
+    if not inp: 
+        print(f"  ❌  Input index {index} tidak ditemukan!")
+        return False
+        
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
+    time.sleep(0.4)
+    
     try:
         ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
         inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
+        inp.send_keys(Keys.DELETE);      time.sleep(0.1)
         inp.send_keys(date_value);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);        time.sleep(0.5)
+        inp.send_keys(Keys.TAB);         time.sleep(0.5)
         val = inp.get_attribute('value')
-        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S1: {e}")
+        if val and val.strip(): 
+            trigger_events(driver, inp)
+            print(f"  ✅  '{val}'")
+            return True
+    except Exception as e: 
+        print(f"  ⚠️  S1: {e}")
+        
     try:
+        # PERBAIKAN: Menggunakan date_value, bukan TODAY_STR
         driver.execute_script("""
             var el=arguments[0],v=arguments[1];
             var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-            s.call(el,v); el.value=v;
+            if(s) s.call(el,v); 
+            el.value=v;
             ['focus','input','change','blur'].forEach(function(e){
                 el.dispatchEvent(new Event(e,{bubbles:true}));});
             el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
-        """, inp, TODAY_STR); time.sleep(0.5)
+        """, inp, date_value) 
+        time.sleep(0.5)
+        
         val = inp.get_attribute('value')
-        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S2: {e}")
-    print(f"  ❌  {label} GAGAL!"); return False
+        if val and val.strip(): 
+            print(f"  ✅  JS '{val}'")
+            return True
+    except Exception as e: 
+        print(f"  ⚠️  S2: {e}")
+        
+    print(f"  ❌  {label} GAGAL!")
+    return False
 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
     driver.switch_to.default_content()
     try:
-        # 1. Scroll ke elemen dropdown
         wg = driver.find_element(By.ID, "WarehouseGroup")
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg)
         time.sleep(0.8)
 
-        # 2. Klik toggle untuk buka dropdown
         toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
         tr = driver.execute_script("""
             var r=arguments[0].getBoundingClientRect();
@@ -445,11 +489,9 @@ def select_warehouse_group_v74(driver, item_text):
         do_click(driver, toggle, tr['x'], tr['y'])
         time.sleep(2.5)
 
-        # 3. Coba klik item (max 3 percobaan)
         for attempt in range(3):
             print(f"    attempt {attempt+1}: mencari '{item_text}'...")
 
-            # Cari elemen dengan text exact match
             match_el = driver.execute_script("""
                 var txt = arguments[0];
                 var found = null;
@@ -466,8 +508,7 @@ def select_warehouse_group_v74(driver, item_text):
                         if (el.textContent.trim() !== txt) continue;
                         var r = el.getBoundingClientRect();
                         if (r.width > 0 && r.height > 0 && r.top > 0 && r.top < 1080) {
-                            found = el;
-                            break;
+                            found = el; break;
                         }
                     }
                     if (found) break;
@@ -482,22 +523,16 @@ def select_warehouse_group_v74(driver, item_text):
 
             print(f"    ✔️  Elemen ditemukan, mencoba klik...")
 
-            # Dispatch full mouse event sequence (paling kompatibel dengan semua framework)
             driver.execute_script("""
                 var el = arguments[0];
                 el.scrollIntoView({block:'center'});
                 ['mouseover','mouseenter','mousemove','mousedown','mouseup','click'].forEach(function(evtName) {
-                    var evt = new MouseEvent(evtName, {
-                        bubbles: true,
-                        cancelable: true,
-                        view: window
-                    });
+                    var evt = new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window });
                     el.dispatchEvent(evt);
                 });
             """, match_el)
             time.sleep(1.5)
 
-            # Verifikasi
             val = driver.execute_script("""
                 var s = document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
                 return s ? s.textContent.trim() : '---';
@@ -519,9 +554,13 @@ def select_warehouse_group_v74(driver, item_text):
 
 def validate_dates_v74(driver):
     driver.switch_to.default_content()
+    # PERBAIKAN: Fallback selector jika class hasDatepicker hilang
     result = driver.execute_script(r"""
         var d={sv:'',ev:''};
         var inps=document.querySelectorAll('input.date.hasDatepicker');
+        if(inps.length < 2) {
+            inps = document.querySelectorAll('.jr-mDialog input[type="text"], [class*="dialog"] input[type="text"]');
+        }
         if(inps[0]) d.sv=inps[0].value.trim();
         if(inps[1]) d.ev=inps[1].value.trim();
         return d;""")
@@ -531,16 +570,13 @@ def validate_dates_v74(driver):
     return so, eo
 
 def run_cell2(driver, gc):
-
     print("\n" + "="*60)
     print("🤖 CELL 2 — BOT v74")
     print("="*60)
 
     try:
-
         driver.get(BOT74_REPORT_URL)
         time.sleep(25)
-
         wait_ready(driver)
 
         fill_date_v74(driver, "Start Date", 0, START_DATE)
@@ -554,18 +590,30 @@ def run_cell2(driver, gc):
             raise SystemExit("VALIDASI TANGGAL GAGAL")
 
         click_apply_dialog(driver)
-
         wait_loading(driver)
 
         downloaded = export_xlsx(driver)
         if downloaded:
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
+            
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("Data")
+                worksheet.update_acell('E3', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel E3 ({now_str}).")
+            except Exception as e:
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+
             bot_footer(exp, url, "Data")
         else:
             print("\n  ⚠️  Download gagal")
-    except SystemExit as se: print(f"\n  🛑  {se}")
-    except Exception as e:   print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+            
+    except SystemExit as se: 
+        print(f"\n  🛑  {se}")
+    except Exception as e:   
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
 # CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
@@ -741,6 +789,21 @@ def run_cell3(driver, gc):
         if downloaded:
             exp = save_to_export(downloaded, "InventoryMove_InProgress")
             url = save_to_gsheet(gc, downloaded, "IM_IP", "Inventory Move In Progress")
+            
+            # --- Update langsung ke Google Sheet ---
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("IM_IP") # Pastikan nama worksheet sesuai target
+                
+                # PERBAIKAN: Menggunakan update_acell agar tidak error 400
+                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
+                
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
+            except Exception as e:
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+            # ---------------------------------------
+            
             bot_footer(exp, url, "IM_IP")
         else:
             print("\n  ⚠️  Download gagal")
@@ -748,112 +811,107 @@ def run_cell3(driver, gc):
     except Exception as e:
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
-# CELL 4 — Monitor SJ In Progress IP → tab "IP"
+# CELL 4 — MTS → tab "MTS2"
 # =============================================================================
 BOT75IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
     "&ParentFolderUri=%2FiDempiere%2FInventory%2FStock"
-    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMonitor_Status_Surat_Jalan___In_Progress__"
+    "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMaterial_Transaction_Summary_With_MR___Shipment_Internal__Raw_Data_"
     "&standAlone=true"
 )
+from datetime import datetime
 
-def select_branch_ip(driver):
-    print("  🏢  Branch: pilih item teratas (Jakarta)")
+# 1. Atur Tanggal menjadi HARI INI untuk keduanya
+TODAY_STR = datetime.today().strftime("%Y-%m-%d")
+START_DATE_MTS2 = TODAY_STR
+END_DATE_MTS2   = TODAY_STR
+
+# 2. Fungsi Isi Tanggal
+def fill_date_mts2(driver, label, index, date_value):
+    print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    toggle_clicked = False
-    for sel in ["a.jr-mSingleselect-input", "button.jr-mSingleselect-input", ".jr-mSingleselect-input"]:
+    try: driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    except: pass
+    time.sleep(0.3)
+    
+    inp = None
+    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+    if index < len(inps): inp = inps[index]
+    
+    if not inp:
         try:
-            els = driver.find_elements(By.CSS_SELECTOR, sel)
-            visible = [e for e in els if e.is_displayed()]
-            if visible:
-                el = visible[0]
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el); time.sleep(0.4)
-                r = driver.execute_script("""
-                    var b=arguments[0].getBoundingClientRect();
-                    return {x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)};""", el)
-                do_click(driver, el, r['x'], r['y']); time.sleep(2.5)
-                toggle_clicked = True; break
-        except: continue
-    if not toggle_clicked:
-        try:
-            el = driver.execute_script("return document.elementFromPoint(914,295);")
-            if el: do_click(driver, el, 914, 295); time.sleep(2.5)
+            all_inps = driver.find_elements(By.CSS_SELECTOR, ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
+            if index < len(all_inps): inp = all_inps[index]
         except: pass
-    for attempt in range(3):
-        items = driver.execute_script(r"""
-            var res=[], SKIP=['---','','–','-','*'];
-            var containers=document.querySelectorAll(
-                '.jr-mSingleselect-listbox,.jr-mSingleselect-dropdown,[class*="listbox"],[class*="dropDown"]');
-            containers.forEach(function(c){
-                if(!c.offsetParent) return;
-                c.querySelectorAll('li,a,div[role="option"],span').forEach(function(el){
-                    if(!el.offsetParent) return;
-                    var t=el.textContent.trim();
-                    if(!t||SKIP.indexOf(t)>-1||t.length>80) return;
-                    if(/^[\*\-–\s]+$/.test(t)) return;
-                    var b=el.getBoundingClientRect();
-                    if(b.width<5||b.height<5) return;
-                    res.push({text:t,cx:Math.round(b.left+b.width/2),cy:Math.round(b.top+b.height/2)});
-                });
-            });
-            if(res.length===0){
-                document.querySelectorAll('li').forEach(function(el){
-                    if(!el.offsetParent) return;
-                    var t=el.textContent.trim();
-                    if(!t||SKIP.indexOf(t)>-1||t.length>80) return;
-                    if(/^[\*\-–\s]+$/.test(t)) return;
-                    var b=el.getBoundingClientRect();
-                    if(b.width<5||b.height<5||b.left<480||b.left>970||b.top<190||b.top>710) return;
-                    res.push({text:t,cx:Math.round(b.left+b.width/2),cy:Math.round(b.top+b.height/2)});
-                });
-            }
-            return res;""")
-        if items:
-            first = items[0]; ix, iy = first['cx'], first['cy']
-            print(f"  → Klik: '{first['text']}' ({ix},{iy})")
-            driver.execute_script("""
-                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
-                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,screenX:x,screenY:y,button:0,buttons:0};
-                el.dispatchEvent(new MouseEvent('mouseover',o));
-                el.dispatchEvent(new MouseEvent('mouseenter',o));
-                el.dispatchEvent(new MouseEvent('mousemove',o));""", ix, iy); time.sleep(0.5)
-            driver.execute_script("""
-                var x=arguments[0],y=arguments[1],el=document.elementFromPoint(x,y); if(!el) return;
-                var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,screenX:x,screenY:y,button:0,buttons:1};
-                el.dispatchEvent(new MouseEvent('mousedown',o));
-                el.dispatchEvent(new MouseEvent('mouseup',o));
-                el.dispatchEvent(new MouseEvent('click',o));""", ix, iy); time.sleep(1.2)
-            closed = driver.execute_script(r"""
-                var d=document.querySelectorAll('.jr-mSingleselect-listbox,.jr-mSingleselect-dropdown,[class*="listbox"],[class*="dropDown"]');
-                for(var i=0;i<d.length;i++) if(d[i].offsetParent) return false;
-                return true;""")
-            if closed: print(f"  ✅  Branch '{first['text']}' dipilih"); return True
-            val = driver.execute_script(r"""
-                var s=document.querySelectorAll('.jr-mSingleselect-input-selection,[class*="singleSelect"] [class*="value"]');
-                for(var i=0;i<s.length;i++){var t=s[i].textContent.trim(); if(t&&t!=='---') return t;}
-                return '';""")
-            if val and val != '---': print(f"  ✅  Branch: '{val}'"); return True
-        if attempt < 2: time.sleep(1.5)
-    print("  ⚠️  Branch: tidak bisa konfirmasi, lanjut ..."); return True
+        
+    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
+    
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
+    try:
+        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
+        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
+        inp.send_keys(Keys.DELETE);      time.sleep(0.1)
+        inp.send_keys(date_value);       time.sleep(0.3)
+        inp.send_keys(Keys.TAB);         time.sleep(0.5)
+        val = inp.get_attribute('value')
+        
+        # Panggil trigger_events jika ada (skip jika error)
+        if val and val.strip(): 
+            try: trigger_events(driver, inp)
+            except NameError: pass 
+            print(f"  ✅  '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S1: {e}")
+    
+    return False
 
+# 3. Main Function untuk CELL 4
 def run_cell4(driver, gc):
     print("\n" + "="*60)
-    print("  🤖  CELL 4 — BOT v75 IP : Monitor SJ In Progress (IP)")
+    print("  🤖  CELL 4 — MTS 2 (Material Transaction Summary Raw Data)")
     print("="*60)
     try:
         driver.get(BOT75IP_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
-        wait_ready(driver)
+        
+        try: wait_ready(driver)
+        except NameError: pass # Abaikan jika wait_ready tidak terdefinisi di scope ini
+        
         print("\n  📋  Input Controls ...")
-        select_branch_ip(driver); time.sleep(0.8)
+        
+        # Langkah 1: Mengisi HANYA Start Date dan End Date
+        fill_date_mts2(driver, "Start Date", 0, START_DATE_MTS2)
+        fill_date_mts2(driver, "End Date", 1, END_DATE_MTS2)
+        time.sleep(1)
+        
+        # Langkah 2: Langsung klik Apply (Mengabaikan dropdown)
         click_apply_dialog(driver)
-        wait_loading(driver)
+        
+        try: wait_loading(driver)
+        except NameError: pass
+        
         time.sleep(3)
+        
+        # Langkah 3: Export & Upload
         downloaded = export_xlsx(driver)
         if downloaded:
-            exp = save_to_export(downloaded, "MonitorSuratJalan_IP")
-            url = save_to_gsheet(gc, downloaded, "IP", "Monitor SJ IP")
-            bot_footer(exp, url, "IP")
+            exp = save_to_export(downloaded, "MaterialTransactionSummary_MTS2")
+            url = save_to_gsheet(gc, downloaded, "MTS2", "Data MTS2")
+            
+            # =========================================================
+            # TAMBAHAN: UPDATE WAKTU TARIKAN KE GOOGLE SHEET
+            # =========================================================
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("MTS2") 
+                
+                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
+            except Exception as e:
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+            # =========================================================
+            
+            bot_footer(exp, url, "MTS2")
         else:
             print("\n  ⚠️  Download gagal")
     except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
