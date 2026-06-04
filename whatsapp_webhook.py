@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 WhatsApp → Twilio → GitHub Actions trigger untuk JasperBot
 """
