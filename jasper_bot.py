@@ -820,23 +820,24 @@ BOT75IP_REPORT_URL = (
     "&standAlone=true"
 )
 from datetime import datetime
+import time
+import traceback
+from selenium.webdriver.common.by import By
 
 # 1. Atur Tanggal menjadi HARI INI untuk keduanya
 TODAY_STR = datetime.today().strftime("%Y-%m-%d")
 START_DATE_MTS2 = TODAY_STR
 END_DATE_MTS2   = TODAY_STR
 
-# 2. Fungsi Isi Tanggal
+# 2. Fungsi Isi Tanggal (Optimized via JS Event Dispatch)
 def fill_date_mts2(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    try: driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
-    except: pass
-    time.sleep(0.3)
     
     inp = None
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index < len(inps): inp = inps[index]
+    if index < len(inps): 
+        inp = inps[index]
     
     if not inp:
         try:
@@ -844,23 +845,43 @@ def fill_date_mts2(driver, label, index, date_value):
             if index < len(all_inps): inp = all_inps[index]
         except: pass
         
-    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
+    if not inp: 
+        print(f"  ❌  Input index {index} tidak ditemukan!"); return False
     
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
+    time.sleep(0.3)
+    
     try:
-        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
-        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
-        inp.send_keys(Keys.DELETE);      time.sleep(0.1)
-        inp.send_keys(date_value);       time.sleep(0.3)
-        inp.send_keys(Keys.TAB);         time.sleep(0.5)
-        val = inp.get_attribute('value')
+        # Inject value dan pemicu event internal Jasper/jQuery
+        driver.execute_script("""
+            var el = arguments[0];
+            var val = arguments[1];
+            el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            if (window.jQuery) {
+                $(el).trigger('change');
+            }
+        """, inp, date_value)
         
-        # Panggil trigger_events jika ada (skip jika error)
-        if val and val.strip(): 
-            try: trigger_events(driver, inp)
-            except NameError: pass 
-            print(f"  ✅  '{val}'"); return True
-    except Exception as e: print(f"  ⚠️  S1: {e}")
+        time.sleep(0.5)
+        
+        # Sembunyikan popup datepicker agar tidak memblokir tombol Apply
+        driver.execute_script("""
+            var dp = document.querySelector('.ui-datepicker');
+            if(dp) dp.style.display='none';
+            if(window.jQuery && $.datepicker) {
+                try { $('#ui-datepicker-div').hide(); } catch(e){}
+            }
+        """)
+        
+        val = inp.get_attribute('value')
+        print(f"  ✅  '{val}'")
+        return True
+        
+    except Exception as e: 
+        print(f"  ⚠️  Error isi tanggal: {e}")
     
     return False
 
@@ -874,16 +895,18 @@ def run_cell4(driver, gc):
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
         
         try: wait_ready(driver)
-        except NameError: pass # Abaikan jika wait_ready tidak terdefinisi di scope ini
+        except NameError: pass
         
         print("\n  📋  Input Controls ...")
         
         # Langkah 1: Mengisi HANYA Start Date dan End Date
         fill_date_mts2(driver, "Start Date", 0, START_DATE_MTS2)
         fill_date_mts2(driver, "End Date", 1, END_DATE_MTS2)
-        time.sleep(1)
         
-        # Langkah 2: Langsung klik Apply (Mengabaikan dropdown)
+        # Beri jeda 2 detik agar state form Jasper sync sebelum klik Apply
+        time.sleep(2)
+        
+        # Langkah 2: Klik Apply
         click_apply_dialog(driver)
         
         try: wait_loading(driver)
@@ -898,7 +921,7 @@ def run_cell4(driver, gc):
             url = save_to_gsheet(gc, downloaded, "MTS2", "Data MTS2")
             
             # =========================================================
-            # TAMBAHAN: UPDATE WAKTU TARIKAN KE GOOGLE SHEET
+            # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
             # =========================================================
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -914,7 +937,8 @@ def run_cell4(driver, gc):
             bot_footer(exp, url, "MTS2")
         else:
             print("\n  ⚠️  Download gagal")
-    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+    except Exception as e: 
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
 # CELL 5 — iDempiere ERP → tab "IP_iDempiere"
 # =============================================================================
