@@ -833,7 +833,6 @@ END_DATE_MTS2   = TODAY_STR
 def fill_date_mts2(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     
-    # Cek & pindah ke iframe jika input controls ada di dalam iframe
     driver.switch_to.default_content()
     iframes = driver.find_elements(By.TAG_NAME, "iframe")
     for iframe in iframes:
@@ -862,7 +861,6 @@ def fill_date_mts2(driver, label, index, date_value):
     time.sleep(0.3)
     
     try:
-        # Direct JS Value Injection + Force Event Propagation
         driver.execute_script("""
             var el = arguments[0];
             var val = arguments[1];
@@ -879,7 +877,6 @@ def fill_date_mts2(driver, label, index, date_value):
         
         time.sleep(0.3)
         
-        # Sembunyikan datepicker overlay
         driver.execute_script("""
             var dp = document.querySelector('.ui-datepicker');
             if(dp) dp.style.display='none';
@@ -897,62 +894,38 @@ def fill_date_mts2(driver, label, index, date_value):
     
     return False
 
-# 3. Robust Apply Trigger Khusus Jasper UI
+# 3. Robust Apply Trigger
 def trigger_jasper_apply_robust(driver):
     print("  🔵 Memproses Klik Apply ...")
     
-    # 1. Buka semua scope (main document + iframes) untuk mencari tombol Apply
-    scopes = [driver]
     driver.switch_to.default_content()
     iframes = driver.find_elements(By.TAG_NAME, "iframe")
     
     clicked = False
-    
-    # Kumpulan script JS untuk mengeksekusi Apply dalam berbagai struktur UI Jasper
     js_apply_script = """
-        // Strategy A: Cari button ID/Class/Name apply yang visible dan tidak disabled
         var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
         var applyBtn = btns.find(b => {
-            var txt = (b.innerText || b.value || '').strip ? (b.innerText || b.value).strip().lower() : '';
-            var id = (b.id || '').lower();
-            var name = (b.getAttribute('name') || '').lower();
+            var txt = (b.innerText || b.value || '').trim().toLowerCase();
+            var id = (b.id || '').toLowerCase();
+            var name = (b.getAttribute('name') || '').toLowerCase();
             return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
         });
 
         if (applyBtn) {
             applyBtn.scrollIntoView({block: 'center'});
             applyBtn.removeAttribute('disabled');
-            
-            // Trigger Mouse Event Native
             ['mousedown', 'mouseup', 'click'].forEach(evt => {
                 applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
             });
-            
-            if (window.jQuery) {
-                $(applyBtn).trigger('click');
-            }
-            
-            // Submit form terdekat jika ada
-            var form = applyBtn.closest('form');
-            if (form && window.jQuery) {
-                $(form).submit();
-            }
+            if (window.jQuery) { $(applyBtn).trigger('click'); }
             return true;
-        }
-        
-        // Strategy B: Panggil langsung Backbone/Jasper Controller jika ada
-        if (window.Jaspersoft && Jaspersoft.report) {
-            try { Jaspersoft.report.runReport(); return true; } catch(e){}
         }
         return false;
     """
 
-    # Cek di main frame
-    try:
-        clicked = driver.execute_script(js_apply_script)
+    try: clicked = driver.execute_script(js_apply_script)
     except: pass
     
-    # Jika belum terklik, cari di dalam iframe-iframe
     if not clicked:
         for iframe in iframes:
             try:
@@ -960,11 +933,9 @@ def trigger_jasper_apply_robust(driver):
                 driver.switch_to.frame(iframe)
                 if driver.execute_script(js_apply_script):
                     clicked = True
-                    print("  ✅ Apply berhasil diklik di dalam iframe")
                     break
             except: continue
 
-    # Fallback Selenium Action jika JS execution tidak menemukan elemen
     if not clicked:
         driver.switch_to.default_content()
         try:
@@ -976,7 +947,57 @@ def trigger_jasper_apply_robust(driver):
         except Exception as e:
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
-# 4. Main Function untuk CELL 4
+# 4. Fungsi Bersihkan Overlay & Trigger Export XLSX
+def force_export_xlsx(driver):
+    print("  📤 Membuka Export Dropdown & Download XLSX ...")
+    
+    # Switch ke default dulu, lalu hapus semua overlay yang memblokir layar
+    driver.switch_to.default_content()
+    
+    driver.execute_script("""
+        // Hapus overlay/spinner penghalang klik
+        var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+        overlays.forEach(function(el) { el.remove(); });
+    """)
+    time.sleep(1)
+    
+    # Skrip JS untuk menembak tombol Export (Biasa/Dropdown) dan pilih XLSX
+    exported = driver.execute_script("""
+        // 1. Coba klik icon/button export langsung jika ada
+        var exportBtn = document.querySelector('#exporter .button') || 
+                        document.querySelector('#export .button') ||
+                        document.querySelector('[title*="Export"]') ||
+                        document.querySelector('.jr-mButtonExport') ||
+                        document.querySelector('#exportElement');
+                        
+        if (exportBtn) {
+            exportBtn.click();
+            if (window.jQuery) $(exportBtn).trigger('click');
+        }
+        
+        // 2. Jika Jasper UI menggunakan direct export / option dropdown
+        var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
+                      document.querySelector('a[href*="xlsx"]') || 
+                      Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
+                      
+        if (xlsxOpt) {
+            xlsxOpt.click();
+            return true;
+        }
+        return false;
+    """)
+    
+    if exported:
+        time.sleep(5)
+        return True
+        
+    # Fallback ke fungsi export bawaan script jika JS inject gagal
+    if 'export_xlsx' in globals():
+        return export_xlsx(driver)
+        
+    return False
+
+# 5. Main Function untuk CELL 4
 def run_cell4(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 4 — MTS 2 (Material Transaction Summary Raw Data)")
@@ -999,20 +1020,16 @@ def run_cell4(driver, gc):
         # Langkah 2: Klik Apply
         trigger_jasper_apply_robust(driver)
         
-        # Tunggu proses report Jasper
+        # Tunggu proses report Jasper selesai
         try: 
             wait_loading(driver)
         except NameError: 
             time.sleep(15)
         
-        time.sleep(3)
+        time.sleep(5)
         
-        # Switch kembali ke frame utama sebelum Export
-        driver.switch_to.default_content()
-        
-        # Langkah 3: Export & Upload
-        print("  📤 Export XLSX ...")
-        downloaded = export_xlsx(driver)
+        # Langkah 3: Export & Upload (Menggunakan Force Export)
+        downloaded = force_export_xlsx(driver)
         if downloaded:
             exp = save_to_export(downloaded, "MaterialTransactionSummary_MTS2")
             url = save_to_gsheet(gc, downloaded, "MTS2", "Data MTS2")
