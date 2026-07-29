@@ -829,10 +829,20 @@ TODAY_STR = datetime.today().strftime("%Y-%m-%d")
 START_DATE_MTS2 = TODAY_STR
 END_DATE_MTS2   = TODAY_STR
 
-# 2. Fungsi Isi Tanggal & Trigger Change
+# 2. Fungsi Isi Tanggal
 def fill_date_mts2(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
+    
+    # Cek & pindah ke iframe jika input controls ada di dalam iframe
     driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    for iframe in iframes:
+        try:
+            driver.switch_to.frame(iframe)
+            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"):
+                break
+        except:
+            driver.switch_to.default_content()
     
     inp = None
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
@@ -858,7 +868,6 @@ def fill_date_mts2(driver, label, index, date_value):
             var val = arguments[1];
             el.value = val;
             
-            // Fire all necessary standard events
             ['focus', 'input', 'change', 'blur', 'keyup'].forEach(function(evt) {
                 el.dispatchEvent(new Event(evt, { bubbles: true }));
             });
@@ -888,46 +897,84 @@ def fill_date_mts2(driver, label, index, date_value):
     
     return False
 
-# 3. Fungsi Khusus Klik Apply untuk Jasper UI
-def trigger_jasper_apply(driver):
+# 3. Robust Apply Trigger Khusus Jasper UI
+def trigger_jasper_apply_robust(driver):
     print("  🔵 Memproses Klik Apply ...")
-    driver.switch_to.default_content()
     
-    success = False
-    try:
-        # Opsi A: Tembak langsung via JS Event / Selector Spesifik Jasper
-        success = driver.execute_script("""
-            var applyBtn = document.querySelector('button#apply') || 
-                           document.querySelector('.jr-mDialog button[name="apply"]') ||
-                           document.querySelector('button.apply') ||
-                           document.querySelector('.button.apply');
-                           
-            if (applyBtn) {
-                applyBtn.scrollIntoView({block: 'center'});
-                applyBtn.focus();
-                applyBtn.click();
-                
-                // Jika jQuery ada, trigger juga via jQuery
-                if (window.jQuery) {
-                    $(applyBtn).trigger('click');
-                }
-                return true;
-            }
-            return false;
-        """)
-    except Exception as e:
-        print(f"  ⚠️ JS Apply Error: {e}")
+    # 1. Buka semua scope (main document + iframes) untuk mencari tombol Apply
+    scopes = [driver]
+    driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    
+    clicked = False
+    
+    # Kumpulan script JS untuk mengeksekusi Apply dalam berbagai struktur UI Jasper
+    js_apply_script = """
+        // Strategy A: Cari button ID/Class/Name apply yang visible dan tidak disabled
+        var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+        var applyBtn = btns.find(b => {
+            var txt = (b.innerText || b.value || '').strip ? (b.innerText || b.value).strip().lower() : '';
+            var id = (b.id || '').lower();
+            var name = (b.getAttribute('name') || '').lower();
+            return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
+        });
 
-    # Opsi B: Fallback jika JS click gagal
-    if not success:
+        if (applyBtn) {
+            applyBtn.scrollIntoView({block: 'center'});
+            applyBtn.removeAttribute('disabled');
+            
+            // Trigger Mouse Event Native
+            ['mousedown', 'mouseup', 'click'].forEach(evt => {
+                applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+            });
+            
+            if (window.jQuery) {
+                $(applyBtn).trigger('click');
+            }
+            
+            // Submit form terdekat jika ada
+            var form = applyBtn.closest('form');
+            if (form && window.jQuery) {
+                $(form).submit();
+            }
+            return true;
+        }
+        
+        // Strategy B: Panggil langsung Backbone/Jasper Controller jika ada
+        if (window.Jaspersoft && Jaspersoft.report) {
+            try { Jaspersoft.report.runReport(); return true; } catch(e){}
+        }
+        return false;
+    """
+
+    # Cek di main frame
+    try:
+        clicked = driver.execute_script(js_apply_script)
+    except: pass
+    
+    # Jika belum terklik, cari di dalam iframe-iframe
+    if not clicked:
+        for iframe in iframes:
+            try:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(iframe)
+                if driver.execute_script(js_apply_script):
+                    clicked = True
+                    print("  ✅ Apply berhasil diklik di dalam iframe")
+                    break
+            except: continue
+
+    # Fallback Selenium Action jika JS execution tidak menemukan elemen
+    if not clicked:
+        driver.switch_to.default_content()
         try:
             if 'click_apply_dialog' in globals():
                 click_apply_dialog(driver)
             else:
-                btn = driver.find_element(By.XPATH, "//button[contains(text(),'Apply') or contains(@id,'apply')]")
-                btn.click()
+                btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'APPLY', 'apply'), 'apply')]")
+                driver.execute_script("arguments[0].click();", btn)
         except Exception as e:
-            print(f"  ⚠️ Selenium Fallback Apply Error: {e}")
+            print(f"  ⚠️ Fallback Apply Error: {e}")
 
 # 4. Main Function untuk CELL 4
 def run_cell4(driver, gc):
@@ -947,19 +994,21 @@ def run_cell4(driver, gc):
         fill_date_mts2(driver, "Start Date", 0, START_DATE_MTS2)
         fill_date_mts2(driver, "End Date", 1, END_DATE_MTS2)
         
-        # Jeda sebentar agar state input tanggal direkam UI
         time.sleep(1.5)
         
-        # Langkah 2: Klik Apply (Versi Robust)
-        trigger_jasper_apply(driver)
+        # Langkah 2: Klik Apply
+        trigger_jasper_apply_robust(driver)
         
-        # Tunggu indikator loading Jasper muncul & hilang
+        # Tunggu proses report Jasper
         try: 
             wait_loading(driver)
         except NameError: 
-            time.sleep(10)
+            time.sleep(15)
         
         time.sleep(3)
+        
+        # Switch kembali ke frame utama sebelum Export
+        driver.switch_to.default_content()
         
         # Langkah 3: Export & Upload
         print("  📤 Export XLSX ...")
