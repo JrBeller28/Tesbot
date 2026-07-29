@@ -824,12 +824,12 @@ import time
 import traceback
 from selenium.webdriver.common.by import By
 
-# 1. Atur Tanggal menjadi HARI INI untuk keduanya
+# 1. Atur Tanggal menjadi HARI INI
 TODAY_STR = datetime.today().strftime("%Y-%m-%d")
 START_DATE_MTS2 = TODAY_STR
 END_DATE_MTS2   = TODAY_STR
 
-# 2. Fungsi Isi Tanggal (Optimized via JS Event Dispatch)
+# 2. Fungsi Isi Tanggal & Trigger Change
 def fill_date_mts2(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
@@ -852,22 +852,25 @@ def fill_date_mts2(driver, label, index, date_value):
     time.sleep(0.3)
     
     try:
-        # Inject value dan pemicu event internal Jasper/jQuery
+        # Direct JS Value Injection + Force Event Propagation
         driver.execute_script("""
             var el = arguments[0];
             var val = arguments[1];
             el.value = val;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            
+            // Fire all necessary standard events
+            ['focus', 'input', 'change', 'blur', 'keyup'].forEach(function(evt) {
+                el.dispatchEvent(new Event(evt, { bubbles: true }));
+            });
+            
             if (window.jQuery) {
-                $(el).trigger('change');
+                $(el).trigger('change').trigger('blur');
             }
         """, inp, date_value)
         
-        time.sleep(0.5)
+        time.sleep(0.3)
         
-        # Sembunyikan popup datepicker agar tidak memblokir tombol Apply
+        # Sembunyikan datepicker overlay
         driver.execute_script("""
             var dp = document.querySelector('.ui-datepicker');
             if(dp) dp.style.display='none';
@@ -885,7 +888,48 @@ def fill_date_mts2(driver, label, index, date_value):
     
     return False
 
-# 3. Main Function untuk CELL 4
+# 3. Fungsi Khusus Klik Apply untuk Jasper UI
+def trigger_jasper_apply(driver):
+    print("  🔵 Memproses Klik Apply ...")
+    driver.switch_to.default_content()
+    
+    success = False
+    try:
+        # Opsi A: Tembak langsung via JS Event / Selector Spesifik Jasper
+        success = driver.execute_script("""
+            var applyBtn = document.querySelector('button#apply') || 
+                           document.querySelector('.jr-mDialog button[name="apply"]') ||
+                           document.querySelector('button.apply') ||
+                           document.querySelector('.button.apply');
+                           
+            if (applyBtn) {
+                applyBtn.scrollIntoView({block: 'center'});
+                applyBtn.focus();
+                applyBtn.click();
+                
+                // Jika jQuery ada, trigger juga via jQuery
+                if (window.jQuery) {
+                    $(applyBtn).trigger('click');
+                }
+                return true;
+            }
+            return false;
+        """)
+    except Exception as e:
+        print(f"  ⚠️ JS Apply Error: {e}")
+
+    # Opsi B: Fallback jika JS click gagal
+    if not success:
+        try:
+            if 'click_apply_dialog' in globals():
+                click_apply_dialog(driver)
+            else:
+                btn = driver.find_element(By.XPATH, "//button[contains(text(),'Apply') or contains(@id,'apply')]")
+                btn.click()
+        except Exception as e:
+            print(f"  ⚠️ Selenium Fallback Apply Error: {e}")
+
+# 4. Main Function untuk CELL 4
 def run_cell4(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 4 — MTS 2 (Material Transaction Summary Raw Data)")
@@ -899,22 +943,26 @@ def run_cell4(driver, gc):
         
         print("\n  📋  Input Controls ...")
         
-        # Langkah 1: Mengisi HANYA Start Date dan End Date
+        # Langkah 1: Mengisi Tanggal
         fill_date_mts2(driver, "Start Date", 0, START_DATE_MTS2)
         fill_date_mts2(driver, "End Date", 1, END_DATE_MTS2)
         
-        # Beri jeda 2 detik agar state form Jasper sync sebelum klik Apply
-        time.sleep(2)
+        # Jeda sebentar agar state input tanggal direkam UI
+        time.sleep(1.5)
         
-        # Langkah 2: Klik Apply
-        click_apply_dialog(driver)
+        # Langkah 2: Klik Apply (Versi Robust)
+        trigger_jasper_apply(driver)
         
-        try: wait_loading(driver)
-        except NameError: pass
+        # Tunggu indikator loading Jasper muncul & hilang
+        try: 
+            wait_loading(driver)
+        except NameError: 
+            time.sleep(10)
         
         time.sleep(3)
         
         # Langkah 3: Export & Upload
+        print("  📤 Export XLSX ...")
         downloaded = export_xlsx(driver)
         if downloaded:
             exp = save_to_export(downloaded, "MaterialTransactionSummary_MTS2")
