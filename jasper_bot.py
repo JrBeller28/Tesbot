@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  JasperBot — GitHub Actions                                             ║
-# ║  1 driver → 1 login → 4 tab (Cell 2/3/4/5)                             ║
+# ║  1 driver → 1 login → 6 tab (Cell 2/3/4/5/6/7)                             ║
 # ║  Rebuilt dari notebook jasper_lagi.ipynb (versi Colab yang berhasil)    ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
@@ -1730,7 +1730,7 @@ def run_cell5(driver, gc):
         print(f"\n  ⚠️  Gagal konversi/upload: {e}")
 
 # =============================================================================
-# MAIN — 1 driver, 1 login, 4 tab
+# MAIN — 1 driver, 1 login, 6 tab
 # =============================================================================
 def run_all_shared(gc, cells):
     driver = make_driver(DOWNLOAD_DIR)
@@ -1743,20 +1743,20 @@ def run_all_shared(gc, cells):
         except Exception as e:
             print(f"  ⚠️  CDP: {e}")
 
-        # LOGIN 1x untuk cell 2/3/4 (Jasper)
-        jasper_cells = [c for c in cells if c in (2, 3, 4)]
+        # LOGIN 1x untuk cell 2/3/4/6/7 (Jasper)
+        jasper_cells = [c for c in cells if c in (2, 3, 4 , 6 , 7)]
         erp_cells    = [c for c in cells if c == 5]
 
         if jasper_cells:
             print("\n" + "="*60)
-            print("  🔑  LOGIN JASPER (1x untuk semua Cell 2/3/4)")
+            print("  🔑  LOGIN JASPER (1x untuk semua Cell 2/3/4/6/7)")
             print("="*60)
             do_login(driver)
 
         first_tab = driver.window_handles[0]
 
         for cell in cells:
-            if cell in (2, 3, 4):
+            if cell in (2, 3, 4 ,6 ,7):
                 # Pastikan CDP kembali ke jasper downloads
                 try:
                     driver.execute_cdp_cmd("Page.setDownloadBehavior",
@@ -1766,6 +1766,8 @@ def run_all_shared(gc, cells):
                 if   cell == 2: run_cell2(driver, gc)
                 elif cell == 3: run_cell3(driver, gc)
                 elif cell == 4: run_cell4(driver, gc)
+                elif cell == 6: run_cell6(driver, gc)
+                elif cell == 7: run_cell7(driver, gc)
                 driver.switch_to.window(first_tab)
                 print(f"  ↩️   Kembali ke tab utama")
 
@@ -1791,8 +1793,8 @@ if __name__ == "__main__":
                         help="Target selesai dalam format HH:MM WIB, e.g. 14:30")
     args = parser.parse_args()
 
-    cells = sorted(set(args.cells)) if args.cells else [2, 3, 4, 5]
-    valid = [c for c in cells if c in (2, 3, 4, 5)]
+    cells = sorted(set(args.cells)) if args.cells else [2, 3, 4, 5 , 6 ,7]
+    valid = [c for c in cells if c in (2, 3, 4, 5 ,6 ,7)]
     if not valid:
         print("❌ Tidak ada cell valid (hanya 2–5)"); sys.exit(1)
 
@@ -1826,7 +1828,7 @@ if __name__ == "__main__":
                 {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
         except: pass
 
-        jasper_cells = [c for c in valid if c in (2, 3, 4)]
+        jasper_cells = [c for c in valid if c in (2, 3, 4, 6, 7)]
         erp_cells    = [c for c in valid if c == 5]
 
         if jasper_cells:
@@ -1846,6 +1848,8 @@ if __name__ == "__main__":
             elif cell == 3: run_cell3(driver, gc)
             elif cell == 4: run_cell4(driver, gc)
             elif cell == 5: run_cell5(driver, gc)
+            elif cell == 6: run_cell6(driver, gc)
+            elif cell == 7: run_cell7(driver, gc)
             driver.switch_to.window(first_tab)
 
         try: driver.quit()
