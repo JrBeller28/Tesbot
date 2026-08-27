@@ -1069,10 +1069,50 @@ BOT76IP_REPORT_URL = (
     "&reportUnit=%2FiDempiere%2FInventory%2FMonitor_Trx%2FMonitor_Status_Dokumen_Outstanding_2_1"
     "&standAlone=true"
 )
+import os
+import glob
 from datetime import datetime
 import time
 import traceback
 from selenium.webdriver.common.by import By
+
+# Helper untuk menangkap lokasi (path string) file .xlsx yang baru saja ter-download
+def get_latest_download_file(timeout=30):
+    # Coba panggil fungsi pencari file bawaan jika sudah ada di script utama
+    for fn_name in ['get_latest_download', 'wait_for_download', 'get_downloaded_file']:
+        if fn_name in globals() and callable(globals()[fn_name]):
+            try:
+                res = globals()[fn_name]()
+                if res and isinstance(res, str) and os.path.exists(res):
+                    return res
+            except Exception:
+                pass
+
+    # Fallback pencarian manual di direktori download
+    download_dirs = []
+    if 'DOWNLOAD_DIR' in globals() and globals()['DOWNLOAD_DIR']:
+        download_dirs.append(globals()['DOWNLOAD_DIR'])
+    download_dirs.extend([
+        os.path.expanduser("~/Downloads"),
+        os.getcwd(),
+        "/tmp"
+    ])
+    
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        for d in download_dirs:
+            if os.path.exists(d):
+                files = [
+                    os.path.join(d, f) for f in os.listdir(d) 
+                    if f.endswith('.xlsx') and not f.endswith('.crdownload') and not f.endswith('.tmp')
+                ]
+                if files:
+                    latest_file = max(files, key=os.path.getmtime)
+                    # Pastikan file ter-download dalam kurun waktu 2 menit terakhir
+                    if time.time() - os.path.getmtime(latest_file) < 120:
+                        return latest_file
+        time.sleep(2)
+    return None
 
 # 1. Fungsi Klik Tanggal Hari Ini (Today) pada Input Controls
 def fill_date_out_today(driver, label, index):
@@ -1186,7 +1226,7 @@ def trigger_jasper_apply_robust(driver):
         except Exception as e:
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
-# 3. Export XLSX Robust & Retry Loop (FIXED)
+# 3. Export XLSX Robust & Returning File Path String
 def force_export_xlsx(driver, retries=5, delay=8):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
@@ -1229,7 +1269,7 @@ def force_export_xlsx(driver, retries=5, delay=8):
             """)
             
             if opened:
-                time.sleep(1.5) # Beri jeda 1.5s agar animasi dropdown mekar
+                time.sleep(1.5)
                 
                 # Langkah B: Klik Opsi Excel (XLSX)
                 exported = driver.execute_script("""
@@ -1251,10 +1291,11 @@ def force_export_xlsx(driver, retries=5, delay=8):
                 
                 if exported:
                     print(f"  ✅ Trigger export via UI berhasil pada percobaan ke-{attempt}")
-                    time.sleep(5)
-                    return True
+                    filepath = get_latest_download_file(timeout=30)
+                    if filepath:
+                        return filepath
 
-        # 2. Fallback Direct Export URL (Jaspersoft Output Format Trigger)
+        # 2. Fallback Direct Export URL
         driver.switch_to.default_content()
         try:
             curr_url = driver.current_url
@@ -1262,15 +1303,25 @@ def force_export_xlsx(driver, retries=5, delay=8):
                 export_url = curr_url + "&outputFormat=xlsx"
                 driver.get(export_url)
                 print(f"  ✅ Trigger export via Direct URL berhasil pada percobaan ke-{attempt}")
-                time.sleep(5)
-                return True
-        except Exception as e:
+                filepath = get_latest_download_file(timeout=30)
+                if filepath:
+                    return filepath
+        except Exception:
             pass
 
-        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
+        # 3. Fallback fungsi global bawaan
+        if 'export_xlsx' in globals():
+            try:
+                res = export_xlsx(driver)
+                if res and isinstance(res, str) and os.path.exists(res):
+                    return res
+            except Exception:
+                pass
+
+        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export / File belum siap, menunggu {delay}s...")
         time.sleep(delay)
         
-    return False
+    return None
 
 # 4. Main Function untuk CELL 6
 def run_cell6(driver, gc):
@@ -1304,9 +1355,9 @@ def run_cell6(driver, gc):
         
         time.sleep(5)
         
-        # Langkah 3: Export & Upload (Menggunakan Retry & Fallback URL)
+        # Langkah 3: Export & Upload
         downloaded = force_export_xlsx(driver, retries=5, delay=8)
-        if downloaded:
+        if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding")
             url = save_to_gsheet(gc, downloaded, "OUT", "Data OUT")
             
@@ -1326,7 +1377,7 @@ def run_cell6(driver, gc):
             
             bot_footer(exp, url, "OUT")
         else:
-            print("\n  ⚠️  Download gagal")
+            print("\n  ⚠️  Download gagal atau file tidak ditemukan")
     except Exception as e: 
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
@@ -1339,10 +1390,50 @@ BOT78IP_REPORT_URL = (
     "&reportUnit=%2FiDempiere%2FInventory%2FMonitor_Trx%2FMonitor_Status_Dokumen_Outstanding_1_1"
     "&standAlone=true"
 )
+import os
+import glob
 from datetime import datetime
 import time
 import traceback
 from selenium.webdriver.common.by import By
+
+# Helper untuk menangkap lokasi (path string) file .xlsx yang baru saja ter-download
+def get_latest_download_file(timeout=30):
+    # Coba panggil fungsi pencari file bawaan jika sudah ada di script utama
+    for fn_name in ['get_latest_download', 'wait_for_download', 'get_downloaded_file']:
+        if fn_name in globals() and callable(globals()[fn_name]):
+            try:
+                res = globals()[fn_name]()
+                if res and isinstance(res, str) and os.path.exists(res):
+                    return res
+            except Exception:
+                pass
+
+    # Fallback pencarian manual di direktori download
+    download_dirs = []
+    if 'DOWNLOAD_DIR' in globals() and globals()['DOWNLOAD_DIR']:
+        download_dirs.append(globals()['DOWNLOAD_DIR'])
+    download_dirs.extend([
+        os.path.expanduser("~/Downloads"),
+        os.getcwd(),
+        "/tmp"
+    ])
+    
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        for d in download_dirs:
+            if os.path.exists(d):
+                files = [
+                    os.path.join(d, f) for f in os.listdir(d) 
+                    if f.endswith('.xlsx') and not f.endswith('.crdownload') and not f.endswith('.tmp')
+                ]
+                if files:
+                    latest_file = max(files, key=os.path.getmtime)
+                    # Pastikan file ter-download dalam kurun waktu 2 menit terakhir
+                    if time.time() - os.path.getmtime(latest_file) < 120:
+                        return latest_file
+        time.sleep(2)
+    return None
 
 # 1. Fungsi Klik Tanggal Hari Ini (Today) pada Input Controls
 def fill_date_out_today(driver, label, index):
@@ -1456,7 +1547,7 @@ def trigger_jasper_apply_robust(driver):
         except Exception as e:
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
-# 3. Export XLSX Robust & Retry Loop (FIXED)
+# 3. Export XLSX Robust & Returning File Path String (FIXED)
 def force_export_xlsx(driver, retries=5, delay=8):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
@@ -1499,7 +1590,7 @@ def force_export_xlsx(driver, retries=5, delay=8):
             """)
             
             if opened:
-                time.sleep(1.5) # Jeda agar animasi dropdown mekar
+                time.sleep(1.5) # Jeda animasi dropdown
                 
                 # Langkah B: Klik Opsi Excel (XLSX)
                 exported = driver.execute_script("""
@@ -1521,8 +1612,9 @@ def force_export_xlsx(driver, retries=5, delay=8):
                 
                 if exported:
                     print(f"  ✅ Trigger export via UI berhasil pada percobaan ke-{attempt}")
-                    time.sleep(5)
-                    return True
+                    filepath = get_latest_download_file(timeout=30)
+                    if filepath:
+                        return filepath
 
         # 2. Fallback Direct Export URL (Jaspersoft Output Format Trigger)
         driver.switch_to.default_content()
@@ -1532,15 +1624,25 @@ def force_export_xlsx(driver, retries=5, delay=8):
                 export_url = curr_url + "&outputFormat=xlsx"
                 driver.get(export_url)
                 print(f"  ✅ Trigger export via Direct URL berhasil pada percobaan ke-{attempt}")
-                time.sleep(5)
-                return True
-        except Exception as e:
+                filepath = get_latest_download_file(timeout=30)
+                if filepath:
+                    return filepath
+        except Exception:
             pass
 
-        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
+        # 3. Fallback fungsi global bawaan jika ada
+        if 'export_xlsx' in globals():
+            try:
+                res = export_xlsx(driver)
+                if res and isinstance(res, str) and os.path.exists(res):
+                    return res
+            except Exception:
+                pass
+
+        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export / File belum siap, menunggu {delay}s...")
         time.sleep(delay)
         
-    return False
+    return None
 
 # 4. Main Function untuk CELL 7
 def run_cell7(driver, gc):
@@ -1574,9 +1676,9 @@ def run_cell7(driver, gc):
         
         time.sleep(5)
         
-        # Langkah 3: Export & Upload (Menggunakan Retry & Fallback URL)
+        # Langkah 3: Export & Upload (Mengembalikan String Path File)
         downloaded = force_export_xlsx(driver, retries=5, delay=8)
-        if downloaded:
+        if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding_Detail")
             url = save_to_gsheet(gc, downloaded, "OUT1", "Data OUT Detail")
             
@@ -1596,7 +1698,7 @@ def run_cell7(driver, gc):
             
             bot_footer(exp, url, "OUT1")
         else:
-            print("\n  ⚠️  Download gagal")
+            print("\n  ⚠️  Download gagal atau file tidak ditemukan")
     except Exception as e: 
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
