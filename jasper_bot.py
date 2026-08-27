@@ -1059,6 +1059,494 @@ def run_cell4(driver, gc):
             print("\n  ⚠️  Download gagal")
     except Exception as e: 
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+
+# =============================================================================
+# CELL 6 — Outstanding → tab "OUT"
+# =============================================================================
+BOT76IP_REPORT_URL = (
+    f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
+    "&ParentFolderUri=%2FiDempiere%2FInventory%2FMonitor_Trx"
+    "&reportUnit=%2FiDempiere%2FInventory%2FMonitor_Trx%2FMonitor_Status_Dokumen_Outstanding_2_1"
+    "&standAlone=true"
+)
+from datetime import datetime
+import time
+import traceback
+from selenium.webdriver.common.by import By
+
+# 1. Fungsi Klik Tanggal Hari Ini (Today) pada Input Controls
+def fill_date_out_today(driver, label, index):
+    print(f"  📅  {label} → Klik & Pilih Hari Ini (Today)")
+    
+    driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    for iframe in iframes:
+        try:
+            driver.switch_to.frame(iframe)
+            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"):
+                break
+        except:
+            driver.switch_to.default_content()
+    
+    try:
+        success = driver.execute_script("""
+            var index = arguments[0];
+            var inps = document.querySelectorAll('input.date.hasDatepicker');
+            var inp = inps[index];
+            if (!inp) return false;
+            
+            // Scroll & klik input untuk memicu datepicker
+            inp.scrollIntoView({block:'center'});
+            inp.click();
+            
+            // Coba klik ikon kalender / trigger di sebelah input jika ada
+            var trigger = inp.nextElementSibling;
+            if (trigger) {
+                trigger.click();
+            }
+            
+            // Jika menggunakan jQuery UI Datepicker, set tanggal ke hari ini via fungsi datepicker
+            if (window.jQuery && $.datepicker) {
+                try {
+                    $(inp).datepicker('setDate', '+0d');
+                    $(inp).trigger('change').trigger('blur');
+                } catch(e) {}
+            }
+            
+            return true;
+        """, index)
+        
+        time.sleep(0.5)
+        
+        # Klik tombol 'Today' atau tanggal hari ini di dalam widget pop-up datepicker jika muncul
+        driver.execute_script("""
+            var todayBtn = document.querySelector('.ui-datepicker-current') || 
+                           document.querySelector('.ui-datepicker-today a') ||
+                           Array.from(document.querySelectorAll('button, a')).find(el => (el.innerText || '').trim().toLowerCase() === 'today');
+            if (todayBtn) {
+                todayBtn.click();
+            } else {
+                // Jika tidak ada tombol today, klik tanggal yang aktif/hari ini
+                var activeDay = document.querySelector('.ui-datepicker-days-cell-over a, .ui-state-highlight');
+                if (activeDay) activeDay.click();
+            }
+        """)
+        
+        time.sleep(0.5)
+        print(f"  ✅  Berhasil memilih tanggal hari ini untuk Tanggal Akhir.")
+        return True
+        
+    except Exception as e: 
+        print(f"  ⚠️  Error klik tanggal hari ini: {e}")
+        return False
+
+# 2. Robust Apply Trigger
+def trigger_jasper_apply_robust(driver):
+    print("  🔵 Memproses Klik Apply ...")
+    
+    driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    
+    clicked = False
+    js_apply_script = """
+        var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+        var applyBtn = btns.find(b => {
+            var txt = (b.innerText || b.value || '').trim().toLowerCase();
+            var id = (b.id || '').toLowerCase();
+            var name = (b.getAttribute('name') || '').toLowerCase();
+            return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
+        });
+
+        if (applyBtn) {
+            applyBtn.scrollIntoView({block: 'center'});
+            applyBtn.removeAttribute('disabled');
+            ['mousedown', 'mouseup', 'click'].forEach(evt => {
+                applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+            });
+            if (window.jQuery) { $(applyBtn).trigger('click'); }
+            return true;
+        }
+        return false;
+    """
+
+    try: clicked = driver.execute_script(js_apply_script)
+    except: pass
+    
+    if not clicked:
+        for iframe in iframes:
+            try:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(iframe)
+                if driver.execute_script(js_apply_script):
+                    clicked = True
+                    break
+            except: continue
+
+    if not clicked:
+        driver.switch_to.default_content()
+        try:
+            if 'click_apply_dialog' in globals():
+                click_apply_dialog(driver)
+            else:
+                btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'APPLY', 'apply'), 'apply')]")
+                driver.execute_script("arguments[0].click();", btn)
+        except Exception as e:
+            print(f"  ⚠️ Fallback Apply Error: {e}")
+
+# 3. Export XLSX dengan Retry Loop
+def force_export_xlsx(driver, retries=5, delay=10):
+    print("  📤 Membuka Export Dropdown & Download XLSX ...")
+    
+    for attempt in range(1, retries + 1):
+        driver.switch_to.default_content()
+        
+        # Bersihkan overlay penghalang
+        driver.execute_script("""
+            var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+            overlays.forEach(function(el) { el.remove(); });
+        """)
+        time.sleep(1)
+        
+        # Coba trigger export via JS
+        exported = driver.execute_script("""
+            var exportBtn = document.querySelector('#exporter .button') || 
+                            document.querySelector('#export .button') ||
+                            document.querySelector('[title*="Export"]') ||
+                            document.querySelector('.jr-mButtonExport') ||
+                            document.querySelector('#exportElement');
+                            
+            if (exportBtn && !exportBtn.disabled) {
+                exportBtn.click();
+                if (window.jQuery) $(exportBtn).trigger('click');
+            }
+            
+            var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
+                          document.querySelector('a[href*="xlsx"]') || 
+                          Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
+                          
+            if (xlsxOpt) {
+                xlsxOpt.click();
+                return true;
+            }
+            return false;
+        """)
+        
+        if exported:
+            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
+            time.sleep(5)
+            return True
+            
+        # Fallback ke fungsi global jika ada
+        if 'export_xlsx' in globals():
+            res = export_xlsx(driver)
+            if res: return res
+
+        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
+        time.sleep(delay)
+        
+    return False
+
+# 4. Main Function untuk CELL 6
+def run_cell6(driver, gc):
+    print("\n" + "="*60)
+    print("  🤖  CELL 6 — Outstanding")
+    print("="*60)
+    try:
+        driver.get(BOT76IP_REPORT_URL)
+        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        
+        try: wait_ready(driver)
+        except NameError: pass
+        
+        print("\n  📋  Input Controls ...")
+        
+        # Langkah 1: Klik Tanggal Akhir Hari Ini
+        fill_date_out_today(driver, "Tanggal Akhir", 0)
+        
+        time.sleep(2)
+        
+        # Langkah 2: Klik Apply
+        trigger_jasper_apply_robust(driver)
+        
+        # Tunggu proses report Jasper selesai
+        try: 
+            wait_loading(driver, timeout=900)
+        except TypeError:
+            wait_loading(driver)
+        except NameError: 
+            time.sleep(30)
+        
+        time.sleep(5)
+        
+        # Langkah 3: Export & Upload (Menggunakan Retry)
+        downloaded = force_export_xlsx(driver, retries=5, delay=10)
+        if downloaded:
+            exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding")
+            url = save_to_gsheet(gc, downloaded, "OUT", "Data OUT")
+            
+            # =========================================================
+            # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
+            # =========================================================
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("OUT") 
+                
+                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
+            except Exception as e:
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+            # =========================================================
+            
+            bot_footer(exp, url, "OUT")
+        else:
+            print("\n  ⚠️  Download gagal")
+    except Exception as e: 
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+
+# =============================================================================
+# CELL 7 — Outstanding Detail→ tab "OUT1"
+# =============================================================================
+BOT78IP_REPORT_URL = (
+    f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
+    "&ParentFolderUri=%2FiDempiere%2FInventory%2FMonitor_Trx"
+    "&reportUnit=%2FiDempiere%2FInventory%2FMonitor_Trx%2FMonitor_Status_Dokumen_Outstanding_1_1"
+    "&standAlone=true"
+)
+from datetime import datetime
+import time
+import traceback
+from selenium.webdriver.common.by import By
+
+# 1. Fungsi Klik Tanggal Hari Ini (Today) pada Input Controls
+def fill_date_out_today(driver, label, index):
+    print(f"  📅  {label} → Klik & Pilih Hari Ini (Today)")
+    
+    driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    for iframe in iframes:
+        try:
+            driver.switch_to.frame(iframe)
+            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"):
+                break
+        except:
+            driver.switch_to.default_content()
+    
+    try:
+        success = driver.execute_script("""
+            var index = arguments[0];
+            var inps = document.querySelectorAll('input.date.hasDatepicker');
+            var inp = inps[index];
+            if (!inp) return false;
+            
+            // Scroll & klik input untuk memicu datepicker
+            inp.scrollIntoView({block:'center'});
+            inp.click();
+            
+            // Coba klik ikon kalender / trigger di sebelah input jika ada
+            var trigger = inp.nextElementSibling;
+            if (trigger) {
+                trigger.click();
+            }
+            
+            // Jika menggunakan jQuery UI Datepicker, set tanggal ke hari ini via fungsi datepicker
+            if (window.jQuery && $.datepicker) {
+                try {
+                    $(inp).datepicker('setDate', '+0d');
+                    $(inp).trigger('change').trigger('blur');
+                } catch(e) {}
+            }
+            
+            return true;
+        """, index)
+        
+        time.sleep(0.5)
+        
+        # Klik tombol 'Today' atau tanggal hari ini di dalam widget pop-up datepicker jika muncul
+        driver.execute_script("""
+            var todayBtn = document.querySelector('.ui-datepicker-current') || 
+                           document.querySelector('.ui-datepicker-today a') ||
+                           Array.from(document.querySelectorAll('button, a')).find(el => (el.innerText || '').trim().toLowerCase() === 'today');
+            if (todayBtn) {
+                todayBtn.click();
+            } else {
+                // Jika tidak ada tombol today, klik tanggal yang aktif/hari ini
+                var activeDay = document.querySelector('.ui-datepicker-days-cell-over a, .ui-state-highlight');
+                if (activeDay) activeDay.click();
+            }
+        """)
+        
+        time.sleep(0.5)
+        print(f"  ✅  Berhasil memilih tanggal hari ini untuk {label}.")
+        return True
+        
+    except Exception as e: 
+        print(f"  ⚠️  Error klik tanggal hari ini: {e}")
+        return False
+
+# 2. Robust Apply Trigger
+def trigger_jasper_apply_robust(driver):
+    print("  🔵 Memproses Klik Apply ...")
+    
+    driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    
+    clicked = False
+    js_apply_script = """
+        var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+        var applyBtn = btns.find(b => {
+            var txt = (b.innerText || b.value || '').trim().toLowerCase();
+            var id = (b.id || '').toLowerCase();
+            var name = (b.getAttribute('name') || '').toLowerCase();
+            return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
+        });
+
+        if (applyBtn) {
+            applyBtn.scrollIntoView({block: 'center'});
+            applyBtn.removeAttribute('disabled');
+            ['mousedown', 'mouseup', 'click'].forEach(evt => {
+                applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+            });
+            if (window.jQuery) { $(applyBtn).trigger('click'); }
+            return true;
+        }
+        return false;
+    """
+
+    try: clicked = driver.execute_script(js_apply_script)
+    except: pass
+    
+    if not clicked:
+        for iframe in iframes:
+            try:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(iframe)
+                if driver.execute_script(js_apply_script):
+                    clicked = True
+                    break
+            except: continue
+
+    if not clicked:
+        driver.switch_to.default_content()
+        try:
+            if 'click_apply_dialog' in globals():
+                click_apply_dialog(driver)
+            else:
+                btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'APPLY', 'apply'), 'apply')]")
+                driver.execute_script("arguments[0].click();", btn)
+        except Exception as e:
+            print(f"  ⚠️ Fallback Apply Error: {e}")
+
+# 3. Export XLSX dengan Retry Loop
+def force_export_xlsx(driver, retries=5, delay=10):
+    print("  📤 Membuka Export Dropdown & Download XLSX ...")
+    
+    for attempt in range(1, retries + 1):
+        driver.switch_to.default_content()
+        
+        # Bersihkan overlay penghalang
+        driver.execute_script("""
+            var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+            overlays.forEach(function(el) { el.remove(); });
+        """)
+        time.sleep(1)
+        
+        # Coba trigger export via JS
+        exported = driver.execute_script("""
+            var exportBtn = document.querySelector('#exporter .button') || 
+                            document.querySelector('#export .button') ||
+                            document.querySelector('[title*="Export"]') ||
+                            document.querySelector('.jr-mButtonExport') ||
+                            document.querySelector('#exportElement');
+                            
+            if (exportBtn && !exportBtn.disabled) {
+                exportBtn.click();
+                if (window.jQuery) $(exportBtn).trigger('click');
+            }
+            
+            var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
+                          document.querySelector('a[href*="xlsx"]') || 
+                          Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
+                          
+            if (xlsxOpt) {
+                xlsxOpt.click();
+                return true;
+            }
+            return false;
+        """)
+        
+        if exported:
+            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
+            time.sleep(5)
+            return True
+            
+        # Fallback ke fungsi global jika ada
+        if 'export_xlsx' in globals():
+            res = export_xlsx(driver)
+            if res: return res
+
+        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
+        time.sleep(delay)
+        
+    return False
+
+# 4. Main Function untuk CELL 7
+def run_cell7(driver, gc):
+    print("\n" + "="*60)
+    print("  🤖  CELL 7 — Outstanding Detail")
+    print("="*60)
+    try:
+        driver.get(BOT78IP_REPORT_URL)
+        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        
+        try: wait_ready(driver)
+        except NameError: pass
+        
+        print("\n  📋  Input Controls ...")
+        
+        # Langkah 1: Klik Tanggal Akhir Hari Ini
+        fill_date_out_today(driver, "Tanggal Akhir", 0)
+        
+        time.sleep(2)
+        
+        # Langkah 2: Klik Apply
+        trigger_jasper_apply_robust(driver)
+        
+        # Tunggu proses report Jasper selesai
+        try: 
+            wait_loading(driver, timeout=900)
+        except TypeError:
+            wait_loading(driver)
+        except NameError: 
+            time.sleep(30)
+        
+        time.sleep(5)
+        
+        # Langkah 3: Export & Upload (Menggunakan Retry)
+        downloaded = force_export_xlsx(driver, retries=5, delay=10)
+        if downloaded:
+            exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding_Detail")
+            url = save_to_gsheet(gc, downloaded, "OUT1", "Data OUT Detail")
+            
+            # =========================================================
+            # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
+            # =========================================================
+            try:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                sh = gc.open_by_url(url)
+                worksheet = sh.worksheet("OUT1") # Diperbarui ke OUT1
+                
+                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
+            except Exception as e:
+                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+            # =========================================================
+            
+            bot_footer(exp, url, "OUT1") # Diperbarui ke OUT1
+        else:
+            print("\n  ⚠️  Download gagal")
+    except Exception as e: 
+        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
 # CELL 5 — iDempiere ERP → tab "IP_iDempiere"
 # =============================================================================
