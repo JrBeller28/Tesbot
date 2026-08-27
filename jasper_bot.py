@@ -1076,8 +1076,10 @@ import time
 import traceback
 from selenium.webdriver.common.by import By
 
-# Helper murni pencari file .xlsx di direktori lokal (tanpa trigger JS/UI pengganggu)
-def get_latest_download_file(initial_files=None, timeout=30):
+# -----------------------------------------------------------------------------
+# Helper Pencari File XLSX Baru Terdownload
+# -----------------------------------------------------------------------------
+def get_latest_download_file(initial_files=None, timeout=35):
     if initial_files is None:
         initial_files = set()
         
@@ -1099,13 +1101,15 @@ def get_latest_download_file(initial_files=None, timeout=30):
                     if f.endswith('.xlsx') and not f.endswith('.crdownload') and not f.endswith('.tmp')
                 ]
                 for f in files:
-                    if f not in initial_files and (time.time() - os.path.getmtime(f) < 180):
+                    if f not in initial_files and (time.time() - os.path.getmtime(f) < 300):
                         return f
         time.sleep(1.5)
     return None
 
-# 1. Fungsi Klik Tanggal Hari Ini (Today) pada Input Controls
-def fill_date_out_today(driver, label, index):
+# -----------------------------------------------------------------------------
+# 1. Klik Tanggal Hari Ini (Today) pada Input Controls
+# -----------------------------------------------------------------------------
+def fill_date_out_today(driver, label, index=0):
     print(f"  📅  {label} → Klik & Pilih Hari Ini (Today)")
     
     driver.switch_to.default_content()
@@ -1137,7 +1141,6 @@ def fill_date_out_today(driver, label, index):
                     $(inp).trigger('change').trigger('blur');
                 } catch(e) {}
             }
-            
             return true;
         """, index)
         
@@ -1156,14 +1159,16 @@ def fill_date_out_today(driver, label, index):
         """)
         
         time.sleep(0.5)
-        print(f"  ✅  Berhasil memilih tanggal hari ini untuk Tanggal Akhir.")
+        print(f"  ✅  Berhasil memilih tanggal hari ini untuk {label}.")
         return True
         
     except Exception as e: 
         print(f"  ⚠️  Error klik tanggal hari ini: {e}")
         return False
 
-# 2. Robust Apply Trigger
+# -----------------------------------------------------------------------------
+# 2. Trigger Apply Robust
+# -----------------------------------------------------------------------------
 def trigger_jasper_apply_robust(driver):
     print("  🔵 Memproses Klik Apply ...")
     
@@ -1183,7 +1188,7 @@ def trigger_jasper_apply_robust(driver):
         if (applyBtn) {
             applyBtn.scrollIntoView({block: 'center'});
             applyBtn.removeAttribute('disabled');
-            ['mousedown', 'mouseup', 'click'].forEach(evt => {
+            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
                 applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
             });
             if (window.jQuery) { $(applyBtn).trigger('click'); }
@@ -1192,8 +1197,10 @@ def trigger_jasper_apply_robust(driver):
         return false;
     """
 
-    try: clicked = driver.execute_script(js_apply_script)
-    except: pass
+    try: 
+        clicked = driver.execute_script(js_apply_script)
+    except: 
+        pass
     
     if not clicked:
         for iframe in iframes:
@@ -1203,7 +1210,8 @@ def trigger_jasper_apply_robust(driver):
                 if driver.execute_script(js_apply_script):
                     clicked = True
                     break
-            except: continue
+            except: 
+                continue
 
     if not clicked:
         driver.switch_to.default_content()
@@ -1216,11 +1224,13 @@ def trigger_jasper_apply_robust(driver):
         except Exception as e:
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
-# 3. Export XLSX Robust (UI Pure Click & Return File Path String)
-def force_export_xlsx(driver, retries=5, delay=6):
+# -----------------------------------------------------------------------------
+# 3. Export XLSX Robust (Multi-Context & Event Injection)
+# -----------------------------------------------------------------------------
+def force_export_xlsx(driver, retries=6, delay=5):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
-    # Catat snapshot file sebelum klik export
+    # Snapshot file sebelum ekspor untuk perbandingan
     download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
     initial_files = set()
     for d in download_dirs:
@@ -1232,72 +1242,121 @@ def force_export_xlsx(driver, retries=5, delay=6):
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         contexts = [None] + iframes
         
+        button_clicked = False
+        
+        # Tahap A: Cari dan klik tombol utama Export
         for ctx in contexts:
             driver.switch_to.default_content()
             if ctx is not None:
-                try: driver.switch_to.frame(ctx)
-                except: continue
+                try: 
+                    driver.switch_to.frame(ctx)
+                except: 
+                    continue
             
-            # 1. Klik Tombol Utama Export
-            opened = driver.execute_script("""
+            button_clicked = driver.execute_script("""
+                function triggerClick(el) {
+                    if (!el) return false;
+                    try {
+                        el.scrollIntoView({block: 'center'});
+                        el.removeAttribute('disabled');
+                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                        });
+                        if (window.jQuery) { $(el).trigger('click'); }
+                        return true;
+                    } catch(e) { return false; }
+                }
+
                 var selectors = [
-                    '#exporter .button', '#exporter button', '#export .button', '#export button',
-                    '.jr-mButtonExport', '[title*="Export"]', '[title*="export"]', '#exportElement',
-                    'button.export', 'div.export button', '.j-button-export'
+                    '#exporter', '#exporter button', '#exporter .button', '#exporter a',
+                    '#exportElement', '#export', '#export button', '#export a',
+                    '.jr-mButtonExport', '.j-button-export', '[title*="Export"]', '[title*="export"]',
+                    '[aria-label*="Export"]', '[aria-label*="export"]', 'button.export', 'div.export button',
+                    'button[name="export"]', '.exportIcon', '.jr-mControlExport', '#reportViewerExport'
                 ];
                 for (var s of selectors) {
-                    var btn = document.querySelector(s);
-                    if (btn && btn.offsetWidth > 0 && !btn.disabled) {
-                        btn.scrollIntoView({block: 'center'});
-                        btn.click();
-                        ['mousedown', 'mouseup', 'click'].forEach(evt => {
-                            btn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                        });
-                        if (window.jQuery) { $(btn).trigger('click'); }
-                        return true;
+                    var el = document.querySelector(s);
+                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+                        if (triggerClick(el)) return true;
                     }
+                }
+
+                var candidates = Array.from(document.querySelectorAll('button, a, div, span, input, i'));
+                var match = candidates.find(el => {
+                    var txt = (el.innerText || el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    return (txt === 'export' || txt.startsWith('export') || txt.includes('export options') || txt === 'ekspor');
+                });
+                if (match) {
+                    return triggerClick(match);
                 }
                 return false;
             """)
             
-            if opened:
+            if button_clicked:
                 time.sleep(1.5)
+                break
                 
-                # 2. Klik Opsi Excel (XLSX)
-                exported = driver.execute_script("""
-                    var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
-                                  document.querySelector('a[data-format="xlsx"]') || 
-                                  document.querySelector('[data-outputformat="xlsx"]') ||
-                                  document.querySelector('a[href*="xlsx"]') || 
-                                  Array.from(document.querySelectorAll('li, a, option, span, div')).find(el => {
-                                      var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                      return txt === 'EXCEL (XLSX)' || txt === 'XLSX' || txt.includes('EXCEL (XLSX)');
-                                  });
-                                  
-                    if (xlsxOpt) {
-                        xlsxOpt.scrollIntoView({block: 'center'});
-                        xlsxOpt.click();
-                        ['mousedown', 'mouseup', 'click'].forEach(evt => {
-                            xlsxOpt.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+        # Tahap B: Cari dan klik opsi XLSX
+        option_clicked = False
+        for ctx in contexts:
+            driver.switch_to.default_content()
+            if ctx is not None:
+                try: 
+                    driver.switch_to.frame(ctx)
+                except: 
+                    continue
+            
+            option_clicked = driver.execute_script("""
+                function triggerClick(el) {
+                    if (!el) return false;
+                    try {
+                        el.scrollIntoView({block: 'center'});
+                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
                         });
-                        if (window.jQuery) { $(xlsxOpt).trigger('click'); }
+                        if (window.jQuery) { $(el).trigger('click'); }
                         return true;
+                    } catch(e) { return false; }
+                }
+
+                var xlsxSelectors = [
+                    'li[data-format="xlsx"]', 'a[data-format="xlsx"]', '[data-outputformat="xlsx"]',
+                    '[data-value="xlsx"]', 'a[href*="xlsx"]', 'li.xlsx', 'a.xlsx', '[data-client-option="xlsx"]'
+                ];
+                for (var s of xlsxSelectors) {
+                    var el = document.querySelector(s);
+                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+                        if (triggerClick(el)) return true;
                     }
-                    return false;
-                """)
-                
-                if exported:
-                    print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
-                    filepath = get_latest_download_file(initial_files=initial_files, timeout=30)
-                    if filepath:
-                        return filepath
+                }
+
+                var allElems = Array.from(document.querySelectorAll('li, a, option, span, div, button, td'));
+                var match = allElems.find(el => {
+                    var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                    return txt === 'EXCEL (XLSX)' || txt === 'XLSX' || txt.includes('EXCEL (XLSX)') || txt === 'EXCEL' || txt.includes('XLSX');
+                });
+                if (match) {
+                    return triggerClick(match);
+                }
+                return false;
+            """)
+            
+            if option_clicked:
+                print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
+                filepath = get_latest_download_file(initial_files=initial_files, timeout=35)
+                if filepath:
+                    return filepath
+                break
 
         print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export / File belum siap, menunggu {delay}s...")
         time.sleep(delay)
         
+    driver.switch_to.default_content()
     return None
 
-# 4. Main Function untuk CELL 6
+# -----------------------------------------------------------------------------
+# 4. Main Function — CELL 6
+# -----------------------------------------------------------------------------
 def run_cell6(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 6 — Outstanding")
@@ -1330,10 +1389,10 @@ def run_cell6(driver, gc):
         time.sleep(5)
         
         # Langkah 3: Export & Upload
-        downloaded = force_export_xlsx(driver, retries=5, delay=6)
+        downloaded = force_export_xlsx(driver, retries=6, delay=5)
         if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding")
-            url = save_to_gsheet(gc, downloaded, "OUT", "OUT")
+            url = save_to_gsheet(gc, downloaded, "OUT", "Data OUT")
             
             # =========================================================
             # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
@@ -1354,7 +1413,6 @@ def run_cell6(driver, gc):
             print("\n  ⚠️  Download gagal atau file tidak ditemukan")
     except Exception as e: 
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
-
 # =============================================================================
 # CELL 7 — Outstanding Detail → tab "OUT1"
 # =============================================================================
@@ -1371,8 +1429,10 @@ import time
 import traceback
 from selenium.webdriver.common.by import By
 
-# Helper murni pencari file .xlsx di direktori lokal (tanpa trigger JS/UI pengganggu)
-def get_latest_download_file(initial_files=None, timeout=30):
+# -----------------------------------------------------------------------------
+# Helper Pencari File XLSX Baru Terdownload
+# -----------------------------------------------------------------------------
+def get_latest_download_file(initial_files=None, timeout=35):
     if initial_files is None:
         initial_files = set()
         
@@ -1394,13 +1454,15 @@ def get_latest_download_file(initial_files=None, timeout=30):
                     if f.endswith('.xlsx') and not f.endswith('.crdownload') and not f.endswith('.tmp')
                 ]
                 for f in files:
-                    if f not in initial_files and (time.time() - os.path.getmtime(f) < 180):
+                    if f not in initial_files and (time.time() - os.path.getmtime(f) < 300):
                         return f
         time.sleep(1.5)
     return None
 
-# 1. Fungsi Klik Tanggal Hari Ini (Today) pada Input Controls
-def fill_date_out_today(driver, label, index):
+# -----------------------------------------------------------------------------
+# 1. Klik Tanggal Hari Ini (Today) pada Input Controls
+# -----------------------------------------------------------------------------
+def fill_date_out_today(driver, label, index=0):
     print(f"  📅  {label} → Klik & Pilih Hari Ini (Today)")
     
     driver.switch_to.default_content()
@@ -1432,7 +1494,6 @@ def fill_date_out_today(driver, label, index):
                     $(inp).trigger('change').trigger('blur');
                 } catch(e) {}
             }
-            
             return true;
         """, index)
         
@@ -1458,7 +1519,9 @@ def fill_date_out_today(driver, label, index):
         print(f"  ⚠️  Error klik tanggal hari ini: {e}")
         return False
 
-# 2. Robust Apply Trigger
+# -----------------------------------------------------------------------------
+# 2. Trigger Apply Robust
+# -----------------------------------------------------------------------------
 def trigger_jasper_apply_robust(driver):
     print("  🔵 Memproses Klik Apply ...")
     
@@ -1478,7 +1541,7 @@ def trigger_jasper_apply_robust(driver):
         if (applyBtn) {
             applyBtn.scrollIntoView({block: 'center'});
             applyBtn.removeAttribute('disabled');
-            ['mousedown', 'mouseup', 'click'].forEach(evt => {
+            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
                 applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
             });
             if (window.jQuery) { $(applyBtn).trigger('click'); }
@@ -1487,8 +1550,10 @@ def trigger_jasper_apply_robust(driver):
         return false;
     """
 
-    try: clicked = driver.execute_script(js_apply_script)
-    except: pass
+    try: 
+        clicked = driver.execute_script(js_apply_script)
+    except: 
+        pass
     
     if not clicked:
         for iframe in iframes:
@@ -1498,7 +1563,8 @@ def trigger_jasper_apply_robust(driver):
                 if driver.execute_script(js_apply_script):
                     clicked = True
                     break
-            except: continue
+            except: 
+                continue
 
     if not clicked:
         driver.switch_to.default_content()
@@ -1511,11 +1577,13 @@ def trigger_jasper_apply_robust(driver):
         except Exception as e:
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
-# 3. Export XLSX Robust (UI Pure Click & Return File Path String)
-def force_export_xlsx(driver, retries=5, delay=6):
+# -----------------------------------------------------------------------------
+# 3. Export XLSX Robust (Multi-Context & Event Injection)
+# -----------------------------------------------------------------------------
+def force_export_xlsx(driver, retries=6, delay=5):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
-    # Catat snapshot file sebelum klik export
+    # Snapshot file sebelum ekspor untuk perbandingan
     download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
     initial_files = set()
     for d in download_dirs:
@@ -1527,72 +1595,121 @@ def force_export_xlsx(driver, retries=5, delay=6):
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         contexts = [None] + iframes
         
+        button_clicked = False
+        
+        # Tahap A: Cari dan klik tombol utama Export
         for ctx in contexts:
             driver.switch_to.default_content()
             if ctx is not None:
-                try: driver.switch_to.frame(ctx)
-                except: continue
+                try: 
+                    driver.switch_to.frame(ctx)
+                except: 
+                    continue
             
-            # 1. Klik Tombol Utama Export
-            opened = driver.execute_script("""
+            button_clicked = driver.execute_script("""
+                function triggerClick(el) {
+                    if (!el) return false;
+                    try {
+                        el.scrollIntoView({block: 'center'});
+                        el.removeAttribute('disabled');
+                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                        });
+                        if (window.jQuery) { $(el).trigger('click'); }
+                        return true;
+                    } catch(e) { return false; }
+                }
+
                 var selectors = [
-                    '#exporter .button', '#exporter button', '#export .button', '#export button',
-                    '.jr-mButtonExport', '[title*="Export"]', '[title*="export"]', '#exportElement',
-                    'button.export', 'div.export button', '.j-button-export'
+                    '#exporter', '#exporter button', '#exporter .button', '#exporter a',
+                    '#exportElement', '#export', '#export button', '#export a',
+                    '.jr-mButtonExport', '.j-button-export', '[title*="Export"]', '[title*="export"]',
+                    '[aria-label*="Export"]', '[aria-label*="export"]', 'button.export', 'div.export button',
+                    'button[name="export"]', '.exportIcon', '.jr-mControlExport', '#reportViewerExport'
                 ];
                 for (var s of selectors) {
-                    var btn = document.querySelector(s);
-                    if (btn && btn.offsetWidth > 0 && !btn.disabled) {
-                        btn.scrollIntoView({block: 'center'});
-                        btn.click();
-                        ['mousedown', 'mouseup', 'click'].forEach(evt => {
-                            btn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                        });
-                        if (window.jQuery) { $(btn).trigger('click'); }
-                        return true;
+                    var el = document.querySelector(s);
+                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+                        if (triggerClick(el)) return true;
                     }
+                }
+
+                var candidates = Array.from(document.querySelectorAll('button, a, div, span, input, i'));
+                var match = candidates.find(el => {
+                    var txt = (el.innerText || el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    return (txt === 'export' || txt.startsWith('export') || txt.includes('export options') || txt === 'ekspor');
+                });
+                if (match) {
+                    return triggerClick(match);
                 }
                 return false;
             """)
             
-            if opened:
+            if button_clicked:
                 time.sleep(1.5)
+                break
                 
-                # 2. Klik Opsi Excel (XLSX)
-                exported = driver.execute_script("""
-                    var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
-                                  document.querySelector('a[data-format="xlsx"]') || 
-                                  document.querySelector('[data-outputformat="xlsx"]') ||
-                                  document.querySelector('a[href*="xlsx"]') || 
-                                  Array.from(document.querySelectorAll('li, a, option, span, div')).find(el => {
-                                      var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                      return txt === 'EXCEL (XLSX)' || txt === 'XLSX' || txt.includes('EXCEL (XLSX)');
-                                  });
-                                  
-                    if (xlsxOpt) {
-                        xlsxOpt.scrollIntoView({block: 'center'});
-                        xlsxOpt.click();
-                        ['mousedown', 'mouseup', 'click'].forEach(evt => {
-                            xlsxOpt.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+        # Tahap B: Cari dan klik opsi XLSX
+        option_clicked = False
+        for ctx in contexts:
+            driver.switch_to.default_content()
+            if ctx is not None:
+                try: 
+                    driver.switch_to.frame(ctx)
+                except: 
+                    continue
+            
+            option_clicked = driver.execute_script("""
+                function triggerClick(el) {
+                    if (!el) return false;
+                    try {
+                        el.scrollIntoView({block: 'center'});
+                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
                         });
-                        if (window.jQuery) { $(xlsxOpt).trigger('click'); }
+                        if (window.jQuery) { $(el).trigger('click'); }
                         return true;
+                    } catch(e) { return false; }
+                }
+
+                var xlsxSelectors = [
+                    'li[data-format="xlsx"]', 'a[data-format="xlsx"]', '[data-outputformat="xlsx"]',
+                    '[data-value="xlsx"]', 'a[href*="xlsx"]', 'li.xlsx', 'a.xlsx', '[data-client-option="xlsx"]'
+                ];
+                for (var s of xlsxSelectors) {
+                    var el = document.querySelector(s);
+                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+                        if (triggerClick(el)) return true;
                     }
-                    return false;
-                """)
-                
-                if exported:
-                    print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
-                    filepath = get_latest_download_file(initial_files=initial_files, timeout=30)
-                    if filepath:
-                        return filepath
+                }
+
+                var allElems = Array.from(document.querySelectorAll('li, a, option, span, div, button, td'));
+                var match = allElems.find(el => {
+                    var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                    return txt === 'EXCEL (XLSX)' || txt === 'XLSX' || txt.includes('EXCEL (XLSX)') || txt === 'EXCEL' || txt.includes('XLSX');
+                });
+                if (match) {
+                    return triggerClick(match);
+                }
+                return false;
+            """)
+            
+            if option_clicked:
+                print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
+                filepath = get_latest_download_file(initial_files=initial_files, timeout=35)
+                if filepath:
+                    return filepath
+                break
 
         print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export / File belum siap, menunggu {delay}s...")
         time.sleep(delay)
         
+    driver.switch_to.default_content()
     return None
 
-# 4. Main Function untuk CELL 7
+# -----------------------------------------------------------------------------
+# 4. Main Function — CELL 7
+# -----------------------------------------------------------------------------
 def run_cell7(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 7 — Outstanding Detail")
@@ -1625,10 +1742,10 @@ def run_cell7(driver, gc):
         time.sleep(5)
         
         # Langkah 3: Export & Upload
-        downloaded = force_export_xlsx(driver, retries=5, delay=6)
+        downloaded = force_export_xlsx(driver, retries=6, delay=5)
         if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding_Detail")
-            url = save_to_gsheet(gc, downloaded, "OUT1", "OUT1")
+            url = save_to_gsheet(gc, downloaded, "OUT1", "Data OUT Detail")
             
             # =========================================================
             # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
