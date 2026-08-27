@@ -1095,17 +1095,12 @@ def fill_date_out_today(driver, label, index):
             var inp = inps[index];
             if (!inp) return false;
             
-            // Scroll & klik input untuk memicu datepicker
             inp.scrollIntoView({block:'center'});
             inp.click();
             
-            // Coba klik ikon kalender / trigger di sebelah input jika ada
             var trigger = inp.nextElementSibling;
-            if (trigger) {
-                trigger.click();
-            }
+            if (trigger) { trigger.click(); }
             
-            // Jika menggunakan jQuery UI Datepicker, set tanggal ke hari ini via fungsi datepicker
             if (window.jQuery && $.datepicker) {
                 try {
                     $(inp).datepicker('setDate', '+0d');
@@ -1118,7 +1113,6 @@ def fill_date_out_today(driver, label, index):
         
         time.sleep(0.5)
         
-        # Klik tombol 'Today' atau tanggal hari ini di dalam widget pop-up datepicker jika muncul
         driver.execute_script("""
             var todayBtn = document.querySelector('.ui-datepicker-current') || 
                            document.querySelector('.ui-datepicker-today a') ||
@@ -1126,7 +1120,6 @@ def fill_date_out_today(driver, label, index):
             if (todayBtn) {
                 todayBtn.click();
             } else {
-                // Jika tidak ada tombol today, klik tanggal yang aktif/hari ini
                 var activeDay = document.querySelector('.ui-datepicker-days-cell-over a, .ui-state-highlight');
                 if (activeDay) activeDay.click();
             }
@@ -1193,53 +1186,86 @@ def trigger_jasper_apply_robust(driver):
         except Exception as e:
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
-# 3. Export XLSX dengan Retry Loop
-def force_export_xlsx(driver, retries=5, delay=10):
+# 3. Export XLSX Robust & Retry Loop (FIXED)
+def force_export_xlsx(driver, retries=5, delay=8):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
     for attempt in range(1, retries + 1):
         driver.switch_to.default_content()
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        contexts = [None] + iframes
         
-        # Bersihkan overlay penghalang
-        driver.execute_script("""
-            var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
-            overlays.forEach(function(el) { el.remove(); });
-        """)
-        time.sleep(1)
-        
-        # Coba trigger export via JS
-        exported = driver.execute_script("""
-            var exportBtn = document.querySelector('#exporter .button') || 
-                            document.querySelector('#export .button') ||
-                            document.querySelector('[title*="Export"]') ||
-                            document.querySelector('.jr-mButtonExport') ||
-                            document.querySelector('#exportElement');
-                            
-            if (exportBtn && !exportBtn.disabled) {
-                exportBtn.click();
-                if (window.jQuery) $(exportBtn).trigger('click');
-            }
+        # 1. Coba Trigger via UI pada Default Content & Frame
+        for ctx in contexts:
+            driver.switch_to.default_content()
+            if ctx is not None:
+                try: driver.switch_to.frame(ctx)
+                except: continue
             
-            var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
-                          document.querySelector('a[href*="xlsx"]') || 
-                          Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
-                          
-            if (xlsxOpt) {
-                xlsxOpt.click();
-                return true;
-            }
-            return false;
-        """)
-        
-        if exported:
-            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
-            time.sleep(5)
-            return True
+            # Hapus overlay pengganggu
+            try:
+                driver.execute_script("""
+                    var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+                    overlays.forEach(function(el) { el.remove(); });
+                """)
+            except: pass
             
-        # Fallback ke fungsi global jika ada
-        if 'export_xlsx' in globals():
-            res = export_xlsx(driver)
-            if res: return res
+            # Langkah A: Klik Tombol Utama Export
+            opened = driver.execute_script("""
+                var btn = document.querySelector('#exporter .button') || 
+                          document.querySelector('#exporter button') ||
+                          document.querySelector('#export .button') ||
+                          document.querySelector('#export button') ||
+                          document.querySelector('.jr-mButtonExport') ||
+                          document.querySelector('[title*="Export"]') ||
+                          document.querySelector('#exportElement');
+                if (btn && !btn.disabled) {
+                    btn.scrollIntoView({block: 'center'});
+                    btn.click();
+                    if (window.jQuery) $(btn).trigger('click');
+                    return true;
+                }
+                return false;
+            """)
+            
+            if opened:
+                time.sleep(1.5) # Beri jeda 1.5s agar animasi dropdown mekar
+                
+                # Langkah B: Klik Opsi Excel (XLSX)
+                exported = driver.execute_script("""
+                    var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
+                                  document.querySelector('a[data-format="xlsx"]') || 
+                                  document.querySelector('a[href*="xlsx"]') || 
+                                  Array.from(document.querySelectorAll('li, a, option, span')).find(el => {
+                                      var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                      return txt.includes('EXCEL (XLSX)') || txt === 'XLSX' || txt.includes('EXCEL');
+                                  });
+                                  
+                    if (xlsxOpt) {
+                        xlsxOpt.click();
+                        if (window.jQuery) $(xlsxOpt).trigger('click');
+                        return true;
+                    }
+                    return false;
+                """)
+                
+                if exported:
+                    print(f"  ✅ Trigger export via UI berhasil pada percobaan ke-{attempt}")
+                    time.sleep(5)
+                    return True
+
+        # 2. Fallback Direct Export URL (Jaspersoft Output Format Trigger)
+        driver.switch_to.default_content()
+        try:
+            curr_url = driver.current_url
+            if "flow.html" in curr_url and "outputFormat=" not in curr_url:
+                export_url = curr_url + "&outputFormat=xlsx"
+                driver.get(export_url)
+                print(f"  ✅ Trigger export via Direct URL berhasil pada percobaan ke-{attempt}")
+                time.sleep(5)
+                return True
+        except Exception as e:
+            pass
 
         print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
         time.sleep(delay)
@@ -1278,8 +1304,8 @@ def run_cell6(driver, gc):
         
         time.sleep(5)
         
-        # Langkah 3: Export & Upload (Menggunakan Retry)
-        downloaded = force_export_xlsx(driver, retries=5, delay=10)
+        # Langkah 3: Export & Upload (Menggunakan Retry & Fallback URL)
+        downloaded = force_export_xlsx(driver, retries=5, delay=8)
         if downloaded:
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding")
             url = save_to_gsheet(gc, downloaded, "OUT", "Data OUT")
@@ -1305,7 +1331,7 @@ def run_cell6(driver, gc):
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
-# CELL 7 — Outstanding Detail→ tab "OUT1"
+# CELL 7 — Outstanding Detail → tab "OUT1"
 # =============================================================================
 BOT78IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
@@ -1339,17 +1365,12 @@ def fill_date_out_today(driver, label, index):
             var inp = inps[index];
             if (!inp) return false;
             
-            // Scroll & klik input untuk memicu datepicker
             inp.scrollIntoView({block:'center'});
             inp.click();
             
-            // Coba klik ikon kalender / trigger di sebelah input jika ada
             var trigger = inp.nextElementSibling;
-            if (trigger) {
-                trigger.click();
-            }
+            if (trigger) { trigger.click(); }
             
-            // Jika menggunakan jQuery UI Datepicker, set tanggal ke hari ini via fungsi datepicker
             if (window.jQuery && $.datepicker) {
                 try {
                     $(inp).datepicker('setDate', '+0d');
@@ -1362,7 +1383,6 @@ def fill_date_out_today(driver, label, index):
         
         time.sleep(0.5)
         
-        # Klik tombol 'Today' atau tanggal hari ini di dalam widget pop-up datepicker jika muncul
         driver.execute_script("""
             var todayBtn = document.querySelector('.ui-datepicker-current') || 
                            document.querySelector('.ui-datepicker-today a') ||
@@ -1370,7 +1390,6 @@ def fill_date_out_today(driver, label, index):
             if (todayBtn) {
                 todayBtn.click();
             } else {
-                // Jika tidak ada tombol today, klik tanggal yang aktif/hari ini
                 var activeDay = document.querySelector('.ui-datepicker-days-cell-over a, .ui-state-highlight');
                 if (activeDay) activeDay.click();
             }
@@ -1437,53 +1456,86 @@ def trigger_jasper_apply_robust(driver):
         except Exception as e:
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
-# 3. Export XLSX dengan Retry Loop
-def force_export_xlsx(driver, retries=5, delay=10):
+# 3. Export XLSX Robust & Retry Loop (FIXED)
+def force_export_xlsx(driver, retries=5, delay=8):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
     for attempt in range(1, retries + 1):
         driver.switch_to.default_content()
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        contexts = [None] + iframes
         
-        # Bersihkan overlay penghalang
-        driver.execute_script("""
-            var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
-            overlays.forEach(function(el) { el.remove(); });
-        """)
-        time.sleep(1)
-        
-        # Coba trigger export via JS
-        exported = driver.execute_script("""
-            var exportBtn = document.querySelector('#exporter .button') || 
-                            document.querySelector('#export .button') ||
-                            document.querySelector('[title*="Export"]') ||
-                            document.querySelector('.jr-mButtonExport') ||
-                            document.querySelector('#exportElement');
-                            
-            if (exportBtn && !exportBtn.disabled) {
-                exportBtn.click();
-                if (window.jQuery) $(exportBtn).trigger('click');
-            }
+        # 1. Coba Trigger via UI pada Default Content & Frame
+        for ctx in contexts:
+            driver.switch_to.default_content()
+            if ctx is not None:
+                try: driver.switch_to.frame(ctx)
+                except: continue
             
-            var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
-                          document.querySelector('a[href*="xlsx"]') || 
-                          Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
-                          
-            if (xlsxOpt) {
-                xlsxOpt.click();
-                return true;
-            }
-            return false;
-        """)
-        
-        if exported:
-            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
-            time.sleep(5)
-            return True
+            # Hapus overlay pengganggu
+            try:
+                driver.execute_script("""
+                    var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+                    overlays.forEach(function(el) { el.remove(); });
+                """)
+            except: pass
             
-        # Fallback ke fungsi global jika ada
-        if 'export_xlsx' in globals():
-            res = export_xlsx(driver)
-            if res: return res
+            # Langkah A: Klik Tombol Utama Export
+            opened = driver.execute_script("""
+                var btn = document.querySelector('#exporter .button') || 
+                          document.querySelector('#exporter button') ||
+                          document.querySelector('#export .button') ||
+                          document.querySelector('#export button') ||
+                          document.querySelector('.jr-mButtonExport') ||
+                          document.querySelector('[title*="Export"]') ||
+                          document.querySelector('#exportElement');
+                if (btn && !btn.disabled) {
+                    btn.scrollIntoView({block: 'center'});
+                    btn.click();
+                    if (window.jQuery) $(btn).trigger('click');
+                    return true;
+                }
+                return false;
+            """)
+            
+            if opened:
+                time.sleep(1.5) # Jeda agar animasi dropdown mekar
+                
+                # Langkah B: Klik Opsi Excel (XLSX)
+                exported = driver.execute_script("""
+                    var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
+                                  document.querySelector('a[data-format="xlsx"]') || 
+                                  document.querySelector('a[href*="xlsx"]') || 
+                                  Array.from(document.querySelectorAll('li, a, option, span')).find(el => {
+                                      var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                      return txt.includes('EXCEL (XLSX)') || txt === 'XLSX' || txt.includes('EXCEL');
+                                  });
+                                  
+                    if (xlsxOpt) {
+                        xlsxOpt.click();
+                        if (window.jQuery) $(xlsxOpt).trigger('click');
+                        return true;
+                    }
+                    return false;
+                """)
+                
+                if exported:
+                    print(f"  ✅ Trigger export via UI berhasil pada percobaan ke-{attempt}")
+                    time.sleep(5)
+                    return True
+
+        # 2. Fallback Direct Export URL (Jaspersoft Output Format Trigger)
+        driver.switch_to.default_content()
+        try:
+            curr_url = driver.current_url
+            if "flow.html" in curr_url and "outputFormat=" not in curr_url:
+                export_url = curr_url + "&outputFormat=xlsx"
+                driver.get(export_url)
+                print(f"  ✅ Trigger export via Direct URL berhasil pada percobaan ke-{attempt}")
+                time.sleep(5)
+                return True
+        except Exception as e:
+            pass
 
         print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
         time.sleep(delay)
@@ -1522,8 +1574,8 @@ def run_cell7(driver, gc):
         
         time.sleep(5)
         
-        # Langkah 3: Export & Upload (Menggunakan Retry)
-        downloaded = force_export_xlsx(driver, retries=5, delay=10)
+        # Langkah 3: Export & Upload (Menggunakan Retry & Fallback URL)
+        downloaded = force_export_xlsx(driver, retries=5, delay=8)
         if downloaded:
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding_Detail")
             url = save_to_gsheet(gc, downloaded, "OUT1", "Data OUT Detail")
@@ -1534,7 +1586,7 @@ def run_cell7(driver, gc):
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
-                worksheet = sh.worksheet("OUT1") # Diperbarui ke OUT1
+                worksheet = sh.worksheet("OUT1")
                 
                 worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
@@ -1542,7 +1594,7 @@ def run_cell7(driver, gc):
                 print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             # =========================================================
             
-            bot_footer(exp, url, "OUT1") # Diperbarui ke OUT1
+            bot_footer(exp, url, "OUT1")
         else:
             print("\n  ⚠️  Download gagal")
     except Exception as e: 
