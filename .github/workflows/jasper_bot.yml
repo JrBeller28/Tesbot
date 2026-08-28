@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       cell:
-        description: 'Cell yang dijalankan (pisah spasi, e.g: 2 3 4)'
+        description: 'Cell yang dijalankan (pisah spasi, e.g: 2 3 4 6 7)'
         required: false
         default: ''
       deadline:
