@@ -73,14 +73,14 @@ def make_driver(download_dir=DOWNLOAD_DIR):
     
     d = webdriver.Chrome(options=opts)
     
-    # PERBAIKAN: Perpanjang timeout load halaman untuk cegah error Gambar 2
+    # PERBAIKAN: Perpanjang timeout load halaman untuk cegah error
     d.set_page_load_timeout(180) 
     d.set_script_timeout(120)
     d.implicitly_wait(0)
     return d
 
 # =============================================================================
-# HELPER FUNCTIONS  (identik dengan notebook)
+# HELPER FUNCTIONS 
 # =============================================================================
 def clean_value(val):
     if val is None: return ''
@@ -139,10 +139,174 @@ def scan_downloads(search_dirs=None):
     now = time.time()
     return [f for f in found if now - os.path.getmtime(f) < 300]
 
+def get_latest_download_file(initial_files=None, timeout=90):
+    if initial_files is None:
+        initial_files = set()
+        
+    download_dirs = []
+    if 'DOWNLOAD_DIR' in globals() and globals()['DOWNLOAD_DIR']:
+        download_dirs.append(globals()['DOWNLOAD_DIR'])
+    download_dirs.extend([
+        os.path.expanduser("~/Downloads"),
+        os.getcwd(),
+        "/tmp"
+    ])
+    
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        for d in download_dirs:
+            if os.path.exists(d):
+                files = [
+                    os.path.join(d, f) for f in os.listdir(d) 
+                    if f.endswith('.xlsx') and not f.endswith('.crdownload') and not f.endswith('.tmp')
+                ]
+                for f in files:
+                    if f not in initial_files and (time.time() - os.path.getmtime(f) < 300):
+                        return f
+        time.sleep(2)
+    return None
+
+def trigger_jasper_apply_robust(driver):
+    print("  🔵 Memproses Klik Apply ...")
+    driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    
+    clicked = False
+    js_apply_script = """
+        var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+        var applyBtn = btns.find(b => {
+            var txt = (b.innerText || b.value || '').trim().toLowerCase();
+            var id = (b.id || '').toLowerCase();
+            var name = (b.getAttribute('name') || '').toLowerCase();
+            return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
+        });
+
+        if (applyBtn) {
+            applyBtn.scrollIntoView({block: 'center'});
+            applyBtn.removeAttribute('disabled');
+            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+            });
+            if (window.jQuery) { $(applyBtn).trigger('click'); }
+            return true;
+        }
+        return false;
+    """
+
+    try: clicked = driver.execute_script(js_apply_script)
+    except: pass
+    
+    if not clicked:
+        for iframe in iframes:
+            try:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(iframe)
+                if driver.execute_script(js_apply_script):
+                    clicked = True
+                    break
+            except: continue
+
+    if not clicked:
+        driver.switch_to.default_content()
+        try:
+            if 'click_apply_dialog' in globals():
+                click_apply_dialog(driver)
+            else:
+                btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'APPLY', 'apply'), 'apply')]")
+                driver.execute_script("arguments[0].click();", btn)
+        except Exception as e:
+            print(f"  ⚠️ Fallback Apply Error: {e}")
+
+def force_export_xlsx(driver, retries=10, delay=10):
+    print("  📤 Membuka Export Dropdown & Download XLSX (Mode Robust) ...")
+    initial_files = set()
+    download_dirs = [globals().get('DOWNLOAD_DIR', '/tmp'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
+    for d in download_dirs:
+        if d and os.path.exists(d):
+            initial_files.update([os.path.join(d, f) for f in os.listdir(d) if f.endswith('.xlsx')])
+            
+    for attempt in range(1, retries + 1):
+        driver.switch_to.default_content()
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        contexts = [None] + iframes
+        
+        exported = False
+        for ctx in contexts:
+            driver.switch_to.default_content()
+            if ctx is not None:
+                try: driver.switch_to.frame(ctx)
+                except: continue
+                
+            driver.execute_script("""
+                var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+                overlays.forEach(function(el) { el.remove(); });
+            """)
+            time.sleep(1)
+            
+            # 1. Klik Export Button
+            button_clicked = driver.execute_script("""
+                var btn = document.querySelector('.jr-mButton-export, [title*="Export"], [title*="export"]') || 
+                          Array.from(document.querySelectorAll('button, a, div')).find(e => {
+                              var t = (e.title || '').toLowerCase();
+                              var c = (e.className || '').toLowerCase();
+                              return (t.includes('export') || c.includes('export')) && e.getBoundingClientRect().width > 0;
+                          });
+                if(btn) {
+                    btn.scrollIntoView({block:'center'});
+                    ['mouseover','mousedown','mouseup','click'].forEach(evt => btn.dispatchEvent(new MouseEvent(evt, {bubbles:true, cancelable:true, view:window})));
+                    if(window.jQuery) $(btn).trigger('click');
+                    return true;
+                }
+                return false;
+            """)
+            
+            if button_clicked:
+                time.sleep(3) 
+                # 2. Klik XLSX
+                option_clicked = driver.execute_script("""
+                    var opt = document.querySelector('li[data-format="xlsx"], a[href*="xlsx"]') || 
+                              Array.from(document.querySelectorAll('li, a, span, div, button')).find(e => {
+                                  var txt = (e.innerText || '').toUpperCase();
+                                  return (txt.includes('XLSX') || txt.includes('EXCEL')) && !txt.includes('PAGINATED') && e.getBoundingClientRect().width > 0;
+                              });
+                    if(opt) {
+                        opt.scrollIntoView({block:'center'});
+                        ['mouseover','mousedown','mouseup','click'].forEach(evt => opt.dispatchEvent(new MouseEvent(evt, {bubbles:true, cancelable:true, view:window})));
+                        if(window.jQuery) $(opt).trigger('click');
+                        return true;
+                    }
+                    return false;
+                """)
+                if option_clicked:
+                    exported = True
+                    break 
+
+        if exported:
+            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
+            filepath = get_latest_download_file(initial_files=initial_files, timeout=90)
+            if filepath:
+                return filepath
+            else:
+                print("  ⚠️ Ekspor diklik, tetapi file tidak terdeteksi di folder unduhan. Mencoba klik alternatif...")
+                driver.switch_to.default_content()
+                if 'export_xlsx' in globals():
+                    res = export_xlsx(driver)
+                    if res: return res
+        else:
+            driver.switch_to.default_content()
+            if 'export_xlsx' in globals():
+                res = export_xlsx(driver)
+                if res:
+                    print(f"  ✅ Trigger export (global fallback) berhasil")
+                    return res
+                    
+        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
+        time.sleep(delay)
+        
+    return None
+
 def do_login(driver):
     print("  → Mencoba membuka halaman Login ...")
-    
-    # Retry logic untuk membuka URL (mengatasi error Gambar 2)
     for i in range(3):
         try:
             driver.get(f"{BASE_URL}/login.html")
@@ -153,9 +317,7 @@ def do_login(driver):
             time.sleep(5)
             if i == 2: raise e
 
-    # Input Credentials
     try:
-        # Tunggu sampai form muncul
         u_field = WebDriverWait(driver, 40).until(
             EC.presence_of_element_located((By.ID, "j_username")))
         u_field.send_keys(USERNAME)
@@ -169,7 +331,6 @@ def do_login(driver):
         
         p.send_keys(PASSWORD)
         
-        # Klik Submit dengan JS (lebih kuat dibanding .click() biasa)
         try:
             btn = WebDriverWait(driver, 20).until(
                 EC.element_to_be_clickable((By.ID, "submitButton")))
@@ -178,14 +339,12 @@ def do_login(driver):
             print("  ⚠️ Tombol submit tidak klikable, mencoba kirim Enter...")
             p.send_keys(Keys.RETURN)
 
-        time.sleep(10) # Beri waktu ekstra setelah login
-        
-        # Verifikasi apakah sudah masuk (cek keberadaan elemen home/logout)
+        time.sleep(10)
         print("  ✅ Login Berhasil")
         
     except TimeoutException:
         print("  ❌ ERROR: Elemen login tidak muncul setelah 40 detik.")
-        driver.save_screenshot("/tmp/error_login.png") # Simpan bukti untuk debugging
+        driver.save_screenshot("/tmp/error_login.png") 
         raise
     except Exception as e:
         print(f"  ❌ ERROR Login: {e}")
@@ -215,8 +374,8 @@ def click_apply_dialog(driver):
     if is_loading_visible(driver): print("  ✅ Apply S3!"); return True
     print("  ⚠️ Loading tidak terdeteksi — lanjut ..."); return True
 
-def wait_loading(driver):
-    print("\n  ⏳ Tunggu loading muncul (max 60s) ...")
+def wait_loading(driver, timeout=600):
+    print(f"\n  ⏳ Tunggu loading muncul (max 60s) ...")
     appeared = False
     for i in range(60):
         time.sleep(1)
@@ -231,7 +390,7 @@ def wait_loading(driver):
         if not is_loading_visible(driver):
             print(f"  ✅ Loading selesai ~{tick*5}s"); break
         if tick % 12 == 0: print(f"    [{tick*5}s] masih loading ...")
-        if tick > 120: print("  ⚠️ Timeout 600s — lanjut ..."); break
+        if (tick*5) > timeout: print(f"  ⚠️ Timeout {timeout}s — lanjut ..."); break
 
 def export_xlsx(driver, search_dirs=None):
     print("\n  📤 Export XLSX ...")
@@ -340,7 +499,6 @@ def export_xlsx(driver, search_dirs=None):
     print("  ❌ Timeout download!"); return None
 
 def save_to_export(local_file, name_prefix):
-    """Simpan backup ke /tmp/jasper_exports/ (ganti save_to_drive untuk Actions)."""
     if not local_file or not os.path.exists(local_file): return None
     ext  = os.path.splitext(local_file)[1]
     dest = os.path.join(FOLDER_OUT, f"{name_prefix}_{TODAY_LABEL}{ext}")
@@ -395,6 +553,7 @@ def bot_footer(export_path, gsheet_url, tab):
 def open_new_tab(driver):
     driver.execute_script("window.open('about:blank', '_blank');")
     driver.switch_to.window(driver.window_handles[-1])
+
 # =============================================================================
 # CELL 2 — Material Transaction Summary → tab "Data"
 # =============================================================================
@@ -404,16 +563,12 @@ BOT74_REPORT_URL = (
     "&standAlone=true"
 )
 BOT74_WAREHOUSE_GROUP = "SCM WHS POK"
-from datetime import datetime
-
 START_DATE = "2025-07-01"
 END_DATE   = datetime.today().strftime("%Y-%m-%d")
 
 def fill_date_v74(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    
-    # Matikan paksa kalender popup agar tidak menimpa nilai
     try: 
         driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
@@ -428,14 +583,9 @@ def fill_date_v74(driver, label, index, date_value):
                 ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
             if index < len(all_inps): inp = all_inps[index]
         except: pass
-    
     if not inp: 
-        print(f"  ❌  Input index {index} tidak ditemukan!")
-        return False
-        
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
-    time.sleep(0.4)
-    
+        print(f"  ❌  Input index {index} tidak ditemukan!"); return False
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
     try:
         ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
         inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
@@ -444,14 +594,9 @@ def fill_date_v74(driver, label, index, date_value):
         inp.send_keys(Keys.TAB);         time.sleep(0.5)
         val = inp.get_attribute('value')
         if val and val.strip(): 
-            trigger_events(driver, inp)
-            print(f"  ✅  '{val}'")
-            return True
-    except Exception as e: 
-        print(f"  ⚠️  S1: {e}")
-        
+            trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S1: {e}")
     try:
-        # PERBAIKAN: Menggunakan date_value, bukan TODAY_STR
         driver.execute_script("""
             var el=arguments[0],v=arguments[1];
             var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
@@ -462,16 +607,10 @@ def fill_date_v74(driver, label, index, date_value):
             el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
         """, inp, date_value) 
         time.sleep(0.5)
-        
         val = inp.get_attribute('value')
-        if val and val.strip(): 
-            print(f"  ✅  JS '{val}'")
-            return True
-    except Exception as e: 
-        print(f"  ⚠️  S2: {e}")
-        
-    print(f"  ❌  {label} GAGAL!")
-    return False
+        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S2: {e}")
+    print(f"  ❌  {label} GAGAL!"); return False
 
 def select_warehouse_group_v74(driver, item_text):
     print(f"  📦  Warehouse Group: '{item_text}'")
@@ -480,7 +619,6 @@ def select_warehouse_group_v74(driver, item_text):
         wg = driver.find_element(By.ID, "WarehouseGroup")
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", wg)
         time.sleep(0.8)
-
         toggle = driver.find_element(By.CSS_SELECTOR, "#WarehouseGroup a.jr-mSingleselect-input")
         tr = driver.execute_script("""
             var r=arguments[0].getBoundingClientRect();
@@ -488,18 +626,13 @@ def select_warehouse_group_v74(driver, item_text):
         """, toggle)
         do_click(driver, toggle, tr['x'], tr['y'])
         time.sleep(2.5)
-
         for attempt in range(3):
-            print(f"    attempt {attempt+1}: mencari '{item_text}'...")
-
             match_el = driver.execute_script("""
                 var txt = arguments[0];
                 var found = null;
                 var selectors = [
-                    '.jr-mSingleselect-list li a',
-                    '.jr-mSingleselect-list li span',
-                    '.jr-mSingleselect-list li',
-                    'ul li a', 'ul li span', 'ul li'
+                    '.jr-mSingleselect-list li a', '.jr-mSingleselect-list li span',
+                    '.jr-mSingleselect-list li', 'ul li a', 'ul li span', 'ul li'
                 ];
                 for (var s=0; s<selectors.length; s++) {
                     var els = document.querySelectorAll(selectors[s]);
@@ -515,14 +648,8 @@ def select_warehouse_group_v74(driver, item_text):
                 }
                 return found;
             """, item_text)
-
             if not match_el:
-                print(f"    ⚠️  Elemen tidak ditemukan, tunggu...")
-                time.sleep(1)
-                continue
-
-            print(f"    ✔️  Elemen ditemukan, mencoba klik...")
-
+                time.sleep(1); continue
             driver.execute_script("""
                 var el = arguments[0];
                 el.scrollIntoView({block:'center'});
@@ -532,29 +659,22 @@ def select_warehouse_group_v74(driver, item_text):
                 });
             """, match_el)
             time.sleep(1.5)
-
             val = driver.execute_script("""
                 var s = document.querySelector('#WarehouseGroup .jr-mSingleselect-input-selection');
                 return s ? s.textContent.trim() : '---';
             """)
-
             if val and val not in ('---', ''):
                 print(f"  ✅  Warehouse Group terpilih: '{val}'")
                 return True
-
-            print(f"    ⚠️  Nilai belum berubah, coba lagi...")
             time.sleep(0.5)
-
         print(f"  ❌  Gagal memilih '{item_text}' setelah 3 percobaan")
         return False
-
     except Exception as e:
         print(f"  ❌  Error: {e}")
         return False
 
 def validate_dates_v74(driver):
     driver.switch_to.default_content()
-    # PERBAIKAN: Fallback selector jika class hasDatepicker hilang
     result = driver.execute_script(r"""
         var d={sv:'',ev:''};
         var inps=document.querySelectorAll('input.date.hasDatepicker');
@@ -573,47 +693,32 @@ def run_cell2(driver, gc):
     print("\n" + "="*60)
     print("🤖 CELL 2 — BOT v74")
     print("="*60)
-
     try:
         driver.get(BOT74_REPORT_URL)
         time.sleep(25)
         wait_ready(driver)
-
         fill_date_v74(driver, "Start Date", 0, START_DATE)
         fill_date_v74(driver, "End Date", 1, END_DATE)
-
         select_warehouse_group_v74(driver, BOT74_WAREHOUSE_GROUP)
-
         so, eo = validate_dates_v74(driver)
-
-        if not so or not eo:
-            raise SystemExit("VALIDASI TANGGAL GAGAL")
-
+        if not so or not eo: raise SystemExit("VALIDASI TANGGAL GAGAL")
         click_apply_dialog(driver)
         wait_loading(driver)
-
         downloaded = export_xlsx(driver)
         if downloaded:
             exp  = save_to_export(downloaded, "MaterialTransactionSummary")
             url  = save_to_gsheet(gc, downloaded, "Data", "MTS")
-            
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
                 worksheet = sh.worksheet("Data")
                 worksheet.update_acell('E3', f"Terakhir Ditarik: {now_str}")
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel E3 ({now_str}).")
-            except Exception as e:
-                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-
+            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             bot_footer(exp, url, "Data")
-        else:
-            print("\n  ⚠️  Download gagal")
-            
-    except SystemExit as se: 
-        print(f"\n  🛑  {se}")
-    except Exception as e:   
-        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+        else: print("\n  ⚠️  Download gagal")
+    except SystemExit as se: print(f"\n  🛑  {se}")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
 # CELL 3 — Monitor Status Inventory Move In Progress Real Time → tab "MM IP"
@@ -624,16 +729,13 @@ BOT75IM_REPORT_URL = (
     "&reportUnit=%2FiDempiere%2FLogistik%2FMonitorTrx%2FInventory_Move%2FMonitor_Status_Inventory_Move_In_Progress__Real_Time_"
     "&standAlone=true"
 )
-from datetime import datetime
-
 DATE_START = "2025-01-01"
 DATE_END   = datetime.today().strftime("%Y-%m-%d")
 
 def fill_date_dialog(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
     driver.switch_to.default_content()
-    try: driver.execute_script(
-        "var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    try: driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
     except: pass
     time.sleep(0.3)
     inp = None
@@ -669,147 +771,55 @@ def fill_date_dialog(driver, label, index, date_value):
         if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
     except Exception as e: print(f"  ⚠️  S2: {e}")
     print(f"  ❌  {label} GAGAL!"); return False
-def select_dropdown_by_text(driver, toggle_index, target_text):
-    print(f"  🔽  Dropdown [{toggle_index}] → '{target_text}'")
-    driver.switch_to.default_content()
 
-    try:
-        toggles = driver.find_elements(By.CSS_SELECTOR, "a.jr-mSingleselect-input")
-        visible = [t for t in toggles if t.is_displayed()]
-
-        if toggle_index >= len(visible):
-            print(f"  ❌  Toggle index {toggle_index} tidak ada")
-            return False
-
-        toggle = visible[toggle_index]
-
-    except Exception as e:
-        print(f"  ❌  {e}")
-        return False
-
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
-    time.sleep(0.5)
 def select_dropdown_by_label(driver, label_text, target_text):
     print(f"  🔽  {label_text} → '{target_text}'")
-
     try:
         label = driver.find_element(By.XPATH, f"//*[contains(text(),'{label_text}')]")
-
         toggle = label.find_element(By.XPATH, "following::a[contains(@class,'jr-mSingleselect-input')][1]")
-
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
-        time.sleep(0.5)
-
-        toggle.click()
-        time.sleep(1)
-
+        time.sleep(0.5); toggle.click(); time.sleep(1)
         option = driver.find_element(By.XPATH, f"//*[text()='{target_text}']")
-        option.click()
-
-        time.sleep(1)
-
+        option.click(); time.sleep(1)
         print(f"  ✅  Terpilih: {target_text}")
         return True
-
     except Exception as e:
-        print(f"  ❌  {e}")
-        return False
-    for attempt in range(3):
+        print(f"  ❌  {e}"); return False
 
-        items = driver.find_elements(By.XPATH, f"//*[text()='{target_text}']")
-
-        for item in items:
-            if item.is_displayed():
-                print(f"  → Klik: '{target_text}'")
-
-                driver.execute_script("""
-                    arguments[0].click();
-
-                    var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
-                    sels.forEach(function(s){
-                        s.dispatchEvent(new Event('change',{bubbles:true}));
-                        s.dispatchEvent(new Event('blur',{bubbles:true}));
-                    });
-                """, item)
-
-                time.sleep(1.5)
-
-                val = driver.execute_script("""
-                    var sels=document.querySelectorAll('.jr-mSingleselect-input-selection');
-                    for(var i=0;i<sels.length;i++){
-                        var t=sels[i].textContent.trim();
-                        if(t && t!=='---') return t;
-                    }
-                    return '';
-                """)
-
-                if val:
-                    print(f"  ✅  Terpilih: '{val}'")
-                    return True
-
-        time.sleep(1)
-    
-    print(f"  ⚠️  '{target_text}' tidak ditemukan")
-    return False
 def run_cell3(driver, gc):
     print("\n" + "="*60)
     print("  🤖  BOT — Inventory Move (Pengepokan) : In Progress")
     print("="*60)
-
     try:
         driver.get(BOT75IM_REPORT_URL)
-        print("  ⏳  25s tunggu load ...")
-        time.sleep(25)
-
+        print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
-
         print("\n  📋  Input Controls ...")
-
-        fill_date_dialog(driver, "Date Start", 0, DATE_START)
-        time.sleep(0.8)
-
-        fill_date_dialog(driver, "Date End", 1, DATE_END)
-        time.sleep(0.8)
-
-        select_dropdown_by_label(driver, "Branch From", "01")
-        time.sleep(0.8)
-
-        select_dropdown_by_label(driver, "Document Type", "Inventory Move (Pengepokan)")
-        time.sleep(0.8)
-
-        select_dropdown_by_label(driver, "DocStatus", "In Progress")
-        time.sleep(0.8)
-
+        fill_date_dialog(driver, "Date Start", 0, DATE_START); time.sleep(0.8)
+        fill_date_dialog(driver, "Date End", 1, DATE_END); time.sleep(0.8)
+        select_dropdown_by_label(driver, "Branch From", "01"); time.sleep(0.8)
+        select_dropdown_by_label(driver, "Document Type", "Inventory Move (Pengepokan)"); time.sleep(0.8)
+        select_dropdown_by_label(driver, "DocStatus", "In Progress"); time.sleep(0.8)
+        
         click_apply_dialog(driver)
         wait_loading(driver)
         time.sleep(3)
-
         downloaded = export_xlsx(driver)
 
         if downloaded:
             exp = save_to_export(downloaded, "InventoryMove_InProgress")
             url = save_to_gsheet(gc, downloaded, "IM_IP", "Inventory Move In Progress")
-            
-            # --- Update langsung ke Google Sheet ---
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
-                worksheet = sh.worksheet("IM_IP") # Pastikan nama worksheet sesuai target
-                
-                # PERBAIKAN: Menggunakan update_acell agar tidak error 400
+                worksheet = sh.worksheet("IM_IP")
                 worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
-                
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
-            except Exception as e:
-                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            # ---------------------------------------
-            
+            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             bot_footer(exp, url, "IM_IP")
-        else:
-            print("\n  ⚠️  Download gagal")
+        else: print("\n  ⚠️  Download gagal")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
-    except Exception as e:
-        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
 # CELL 4 — MTS → tab "MTS2"
 # =============================================================================
@@ -819,188 +829,50 @@ BOT75IP_REPORT_URL = (
     "&reportUnit=%2FiDempiere%2FInventory%2FStock%2FMaterial_Transaction_Summary_With_MR___Shipment_Internal__Raw_Data_"
     "&standAlone=true"
 )
-from datetime import datetime
-import time
-import traceback
-from selenium.webdriver.common.by import By
+START_DATE_MTS2 = datetime.today().strftime("%Y-%m-%d")
+END_DATE_MTS2   = datetime.today().strftime("%Y-%m-%d")
 
-# 1. Atur Tanggal menjadi HARI INI
-TODAY_STR = datetime.today().strftime("%Y-%m-%d")
-START_DATE_MTS2 = TODAY_STR
-END_DATE_MTS2   = TODAY_STR
-
-# 2. Fungsi Isi Tanggal
 def fill_date_mts2(driver, label, index, date_value):
     print(f"  📅  {label} → '{date_value}'")
-    
     driver.switch_to.default_content()
     iframes = driver.find_elements(By.TAG_NAME, "iframe")
     for iframe in iframes:
         try:
             driver.switch_to.frame(iframe)
-            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"):
-                break
-        except:
-            driver.switch_to.default_content()
+            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"): break
+        except: driver.switch_to.default_content()
     
     inp = None
     inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
-    if index < len(inps): 
-        inp = inps[index]
-    
+    if index < len(inps): inp = inps[index]
     if not inp:
         try:
             all_inps = driver.find_elements(By.CSS_SELECTOR, ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
             if index < len(all_inps): inp = all_inps[index]
         except: pass
-        
-    if not inp: 
-        print(f"  ❌  Input index {index} tidak ditemukan!"); return False
+    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
     
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
-    time.sleep(0.3)
-    
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.3)
     try:
         driver.execute_script("""
-            var el = arguments[0];
-            var val = arguments[1];
-            el.value = val;
-            
+            var el = arguments[0]; var val = arguments[1]; el.value = val;
             ['focus', 'input', 'change', 'blur', 'keyup'].forEach(function(evt) {
                 el.dispatchEvent(new Event(evt, { bubbles: true }));
             });
-            
-            if (window.jQuery) {
-                $(el).trigger('change').trigger('blur');
-            }
+            if (window.jQuery) { $(el).trigger('change').trigger('blur'); }
         """, inp, date_value)
-        
         time.sleep(0.3)
-        
         driver.execute_script("""
             var dp = document.querySelector('.ui-datepicker');
             if(dp) dp.style.display='none';
-            if(window.jQuery && $.datepicker) {
-                try { $('#ui-datepicker-div').hide(); } catch(e){}
-            }
+            if(window.jQuery && $.datepicker) { try { $('#ui-datepicker-div').hide(); } catch(e){} }
         """)
-        
         val = inp.get_attribute('value')
         print(f"  ✅  '{val}'")
         return True
-        
-    except Exception as e: 
-        print(f"  ⚠️  Error isi tanggal: {e}")
-    
+    except Exception as e: print(f"  ⚠️  Error isi tanggal: {e}")
     return False
 
-# 3. Robust Apply Trigger
-def trigger_jasper_apply_robust(driver):
-    print("  🔵 Memproses Klik Apply ...")
-    
-    driver.switch_to.default_content()
-    iframes = driver.find_elements(By.TAG_NAME, "iframe")
-    
-    clicked = False
-    js_apply_script = """
-        var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
-        var applyBtn = btns.find(b => {
-            var txt = (b.innerText || b.value || '').trim().toLowerCase();
-            var id = (b.id || '').toLowerCase();
-            var name = (b.getAttribute('name') || '').toLowerCase();
-            return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
-        });
-
-        if (applyBtn) {
-            applyBtn.scrollIntoView({block: 'center'});
-            applyBtn.removeAttribute('disabled');
-            ['mousedown', 'mouseup', 'click'].forEach(evt => {
-                applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-            });
-            if (window.jQuery) { $(applyBtn).trigger('click'); }
-            return true;
-        }
-        return false;
-    """
-
-    try: clicked = driver.execute_script(js_apply_script)
-    except: pass
-    
-    if not clicked:
-        for iframe in iframes:
-            try:
-                driver.switch_to.default_content()
-                driver.switch_to.frame(iframe)
-                if driver.execute_script(js_apply_script):
-                    clicked = True
-                    break
-            except: continue
-
-    if not clicked:
-        driver.switch_to.default_content()
-        try:
-            if 'click_apply_dialog' in globals():
-                click_apply_dialog(driver)
-            else:
-                btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'APPLY', 'apply'), 'apply')]")
-                driver.execute_script("arguments[0].click();", btn)
-        except Exception as e:
-            print(f"  ⚠️ Fallback Apply Error: {e}")
-
-# 4. Export XLSX dengan Retry Loop
-def force_export_xlsx(driver, retries=5, delay=10):
-    print("  📤 Membuka Export Dropdown & Download XLSX ...")
-    
-    for attempt in range(1, retries + 1):
-        driver.switch_to.default_content()
-        
-        # Bersihkan overlay penghalang
-        driver.execute_script("""
-            var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
-            overlays.forEach(function(el) { el.remove(); });
-        """)
-        time.sleep(1)
-        
-        # Coba trigger export via JS
-        exported = driver.execute_script("""
-            var exportBtn = document.querySelector('#exporter .button') || 
-                            document.querySelector('#export .button') ||
-                            document.querySelector('[title*="Export"]') ||
-                            document.querySelector('.jr-mButtonExport') ||
-                            document.querySelector('#exportElement');
-                            
-            if (exportBtn && !exportBtn.disabled) {
-                exportBtn.click();
-                if (window.jQuery) $(exportBtn).trigger('click');
-            }
-            
-            var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
-                          document.querySelector('a[href*="xlsx"]') || 
-                          Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
-                          
-            if (xlsxOpt) {
-                xlsxOpt.click();
-                return true;
-            }
-            return false;
-        """)
-        
-        if exported:
-            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
-            time.sleep(5)
-            return True
-            
-        # Fallback ke fungsi global jika ada
-        if 'export_xlsx' in globals():
-            res = export_xlsx(driver)
-            if res: return res
-
-        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
-        time.sleep(delay)
-        
-    return False
-
-# 5. Main Function untuk CELL 4
 def run_cell4(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 4 — MTS 2 (Material Transaction Summary Raw Data)")
@@ -1008,60 +880,36 @@ def run_cell4(driver, gc):
     try:
         driver.get(BOT75IP_REPORT_URL)
         print("  ⏳  25s tunggu load ..."); time.sleep(25)
-        
         try: wait_ready(driver)
         except NameError: pass
-        
         print("\n  📋  Input Controls ...")
         
-        # Langkah 1: Mengisi Tanggal
         fill_date_mts2(driver, "Start Date", 0, START_DATE_MTS2)
         fill_date_mts2(driver, "End Date", 1, END_DATE_MTS2)
-        
         time.sleep(2)
-        
-        # Langkah 2: Klik Apply
         trigger_jasper_apply_robust(driver)
-        
-        # Tunggu proses report Jasper selesai (Beri batas waktu hingga 900s / 15 menit)
-        try: 
-            # Jika wait_loading mendukung parameter timeout, passing 900
-            wait_loading(driver, timeout=900)
-        except TypeError:
-            wait_loading(driver)
-        except NameError: 
-            time.sleep(30)
-        
+        wait_loading(driver, timeout=900)
         time.sleep(5)
         
-        # Langkah 3: Export & Upload (Menggunakan Retry)
+        # Panggil fungsi global yang sudah diperbaiki
         downloaded = force_export_xlsx(driver, retries=5, delay=10)
+        
         if downloaded:
             exp = save_to_export(downloaded, "MaterialTransactionSummary_MTS2")
             url = save_to_gsheet(gc, downloaded, "MTS2", "Data MTS2")
-            
-            # =========================================================
-            # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
-            # =========================================================
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
                 worksheet = sh.worksheet("MTS2") 
-                
                 worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
-            except Exception as e:
-                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            # =========================================================
-            
+            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             bot_footer(exp, url, "MTS2")
-        else:
-            print("\n  ⚠️  Download gagal")
-    except Exception as e: 
-        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+        else: print("\n  ⚠️  Download gagal")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
-# CELL 6 — Outstanding → tab "OUT" (Waktu Tunggu Ditingkatkan & Fix Iframe)
+# CELL 6 — Outstanding → tab "OUT"
 # =============================================================================
 BOT76IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
@@ -1069,58 +917,16 @@ BOT76IP_REPORT_URL = (
     "&reportUnit=%2FiDempiere%2FInventory%2FMonitor_Trx%2FMonitor_Status_Dokumen_Outstanding_2_1"
     "&standAlone=true"
 )
-import os
-import glob
-from datetime import datetime
-import time
-import traceback
-from selenium.webdriver.common.by import By
 
-# -----------------------------------------------------------------------------
-# Helper Pencari File XLSX Baru Terdownload
-# -----------------------------------------------------------------------------
-def get_latest_download_file(initial_files=None, timeout=90):
-    if initial_files is None:
-        initial_files = set()
-        
-    download_dirs = []
-    if 'DOWNLOAD_DIR' in globals() and globals()['DOWNLOAD_DIR']:
-        download_dirs.append(globals()['DOWNLOAD_DIR'])
-    download_dirs.extend([
-        os.path.expanduser("~/Downloads"),
-        os.getcwd(),
-        "/tmp"
-    ])
-    
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        for d in download_dirs:
-            if os.path.exists(d):
-                files = [
-                    os.path.join(d, f) for f in os.listdir(d) 
-                    if f.endswith('.xlsx') and not f.endswith('.crdownload') and not f.endswith('.tmp')
-                ]
-                for f in files:
-                    if f not in initial_files and (time.time() - os.path.getmtime(f) < 300):
-                        return f
-        time.sleep(2)
-    return None
-
-# -----------------------------------------------------------------------------
-# 1. Klik Tanggal Hari Ini (Today) pada Input Controls
-# -----------------------------------------------------------------------------
 def fill_date_out_today(driver, label, index=0):
     print(f"  📅  {label} → Klik & Pilih Hari Ini (Today)")
-    
     driver.switch_to.default_content()
     iframes = driver.find_elements(By.TAG_NAME, "iframe")
     for iframe in iframes:
         try:
             driver.switch_to.frame(iframe)
-            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"):
-                break
-        except:
-            driver.switch_to.default_content()
+            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"): break
+        except: driver.switch_to.default_content()
     
     try:
         driver.execute_script("""
@@ -1143,178 +949,22 @@ def fill_date_out_today(driver, label, index=0):
             }
             return true;
         """, index)
-        
         time.sleep(1)
-        
         driver.execute_script("""
             var todayBtn = document.querySelector('.ui-datepicker-current') || 
                            document.querySelector('.ui-datepicker-today a') ||
                            Array.from(document.querySelectorAll('button, a')).find(el => (el.innerText || '').trim().toLowerCase() === 'today');
-            if (todayBtn) {
-                todayBtn.click();
-            } else {
+            if (todayBtn) { todayBtn.click(); } else {
                 var activeDay = document.querySelector('.ui-datepicker-days-cell-over a, .ui-state-highlight');
                 if (activeDay) activeDay.click();
             }
         """)
-        
         time.sleep(1)
         print(f"  ✅  Berhasil memilih tanggal hari ini untuk {label}.")
         return True
-        
     except Exception as e: 
-        print(f"  ⚠️  Error klik tanggal hari ini: {e}")
-        return False
+        print(f"  ⚠️  Error klik tanggal hari ini: {e}"); return False
 
-# -----------------------------------------------------------------------------
-# 2. Trigger Apply Robust
-# -----------------------------------------------------------------------------
-def trigger_jasper_apply_robust(driver):
-    print("  🔵 Memproses Klik Apply ...")
-    
-    driver.switch_to.default_content()
-    iframes = driver.find_elements(By.TAG_NAME, "iframe")
-    
-    clicked = False
-    js_apply_script = """
-        var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
-        var applyBtn = btns.find(b => {
-            var txt = (b.innerText || b.value || '').trim().toLowerCase();
-            var id = (b.id || '').toLowerCase();
-            var name = (b.getAttribute('name') || '').toLowerCase();
-            return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
-        });
-
-        if (applyBtn) {
-            applyBtn.scrollIntoView({block: 'center'});
-            applyBtn.removeAttribute('disabled');
-            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-            });
-            if (window.jQuery) { $(applyBtn).trigger('click'); }
-            return true;
-        }
-        return false;
-    """
-
-    try: 
-        clicked = driver.execute_script(js_apply_script)
-    except: 
-        pass
-    
-    if not clicked:
-        for iframe in iframes:
-            try:
-                driver.switch_to.default_content()
-                driver.switch_to.frame(iframe)
-                if driver.execute_script(js_apply_script):
-                    clicked = True
-                    break
-            except: 
-                continue
-
-    if not clicked:
-        driver.switch_to.default_content()
-        try:
-            if 'click_apply_dialog' in globals():
-                click_apply_dialog(driver)
-            else:
-                btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'APPLY', 'apply'), 'apply')]")
-                driver.execute_script("arguments[0].click();", btn)
-        except Exception as e:
-            print(f"  ⚠️ Fallback Apply Error: {e}")
-
-# -----------------------------------------------------------------------------
-# 3. Export XLSX Robust (Perbaikan Frame & Deteksi File)
-# -----------------------------------------------------------------------------
-def force_export_xlsx(driver, retries=10, delay=10):
-    print("  📤 Membuka Export Dropdown & Download XLSX ...")
-    
-    initial_files = set()
-    download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
-    for d in download_dirs:
-        if d and os.path.exists(d):
-            initial_files.update([os.path.join(d, f) for f in os.listdir(d) if f.endswith('.xlsx')])
-    
-    for attempt in range(1, retries + 1):
-        driver.switch_to.default_content()
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        contexts = [None] + iframes
-        
-        exported = False
-        for ctx in contexts:
-            driver.switch_to.default_content()
-            if ctx is not None:
-                try:
-                    driver.switch_to.frame(ctx)
-                except:
-                    continue
-            
-            # Bersihkan overlay penghalang
-            driver.execute_script("""
-                var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
-                overlays.forEach(function(el) { el.remove(); });
-            """)
-            time.sleep(1)
-            
-            # 1. Klik Tombol Export Utama
-            button_clicked = driver.execute_script("""
-                var exportBtn = document.querySelector('#exporter .button') || 
-                                document.querySelector('#export .button') ||
-                                document.querySelector('[title*="Export"]') ||
-                                document.querySelector('.jr-mButtonExport') ||
-                                document.querySelector('#exportElement');
-                                
-                if (exportBtn && !exportBtn.disabled) {
-                    exportBtn.click();
-                    if (window.jQuery) $(exportBtn).trigger('click');
-                    return true;
-                }
-                return false;
-            """)
-            
-            if button_clicked:
-                time.sleep(2)  # Jeda agar dropdown menu merender
-                
-                # 2. Klik Opsi XLSX
-                option_clicked = driver.execute_script("""
-                    var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
-                                  document.querySelector('a[href*="xlsx"]') || 
-                                  Array.from(document.querySelectorAll('li, a, option, span')).find(el => 
-                                      (el.innerText || '').toUpperCase().includes('XLSX') || 
-                                      (el.innerText || '').toUpperCase().includes('EXCEL')
-                                  );
-                                  
-                    if (xlsxOpt) {
-                        xlsxOpt.click();
-                        if (window.jQuery) $(xlsxOpt).trigger('click');
-                        return true;
-                    }
-                    return false;
-                """)
-                
-                if option_clicked:
-                    exported = True
-                    break
-        
-        if exported:
-            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
-            filepath = get_latest_download_file(initial_files=initial_files, timeout=90)
-            if filepath:
-                return filepath
-            else:
-                print("  ⚠️ Ekspor diklik, tetapi file tidak terdeteksi di folder unduhan.")
-                return None
-
-        # Hindari memanggil fallback export_xlsx global jika elemen murni terhalang iframe
-        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
-        time.sleep(delay)
-        
-    return None
-
-# -----------------------------------------------------------------------------
-# 4. Main Function — CELL 6
-# -----------------------------------------------------------------------------
 def run_cell6(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 6 — Outstanding")
@@ -1322,50 +972,33 @@ def run_cell6(driver, gc):
     try:
         driver.get(BOT76IP_REPORT_URL)
         print("  ⏳  45s tunggu load ..."); time.sleep(45)
-        
         try: wait_ready(driver)
         except NameError: pass
         
         print("\n  📋  Input Controls ...")
-        
-        fill_date_out_today(driver, "Tanggal Akhir", 0)
-        time.sleep(3)
-        
+        fill_date_out_today(driver, "Tanggal Akhir", 0); time.sleep(3)
         trigger_jasper_apply_robust(driver)
-        
-        try: 
-            wait_loading(driver, timeout=1200)
-        except TypeError:
-            wait_loading(driver)
-        except NameError: 
-            print("  ⏳ Tunggu rendering laporan 60 detik ...")
-            time.sleep(60)
-        
+        wait_loading(driver, timeout=1200)
         time.sleep(10)
         
-        # Ekspor File
         downloaded = force_export_xlsx(driver, retries=10, delay=10)
         
         if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding")
             url = save_to_gsheet(gc, downloaded, "OUT", "Data OUT")
-            
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
                 worksheet = sh.worksheet("OUT")
                 worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
-            except Exception as e:
-                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            
+            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             bot_footer(exp, url, "OUT")
-        else:
-            print("\n  ⚠️  Download gagal atau path file string tidak valid")
-    except Exception as e: 
-        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+        else: print("\n  ⚠️  Download gagal atau path file string tidak valid")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+
 # =============================================================================
-# CELL 7 — Outstanding Detail → tab "OUT1" (Waktu Tunggu Ditingkatkan & Fix Iframe)
+# CELL 7 — Outstanding Detail → tab "OUT1"
 # =============================================================================
 BOT78IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
@@ -1373,251 +1006,7 @@ BOT78IP_REPORT_URL = (
     "&reportUnit=%2FiDempiere%2FInventory%2FMonitor_Trx%2FMonitor_Status_Dokumen_Outstanding_1_1"
     "&standAlone=true"
 )
-import os
-import glob
-from datetime import datetime
-import time
-import traceback
-from selenium.webdriver.common.by import By
 
-# -----------------------------------------------------------------------------
-# Helper Pencari File XLSX Baru Terdownload (Timeout ditingkatkan ke 90 detik)
-# -----------------------------------------------------------------------------
-def get_latest_download_file(initial_files=None, timeout=90):
-    if initial_files is None:
-        initial_files = set()
-        
-    download_dirs = []
-    if 'DOWNLOAD_DIR' in globals() and globals()['DOWNLOAD_DIR']:
-        download_dirs.append(globals()['DOWNLOAD_DIR'])
-    download_dirs.extend([
-        os.path.expanduser("~/Downloads"),
-        os.getcwd(),
-        "/tmp"
-    ])
-    
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        for d in download_dirs:
-            if os.path.exists(d):
-                files = [
-                    os.path.join(d, f) for f in os.listdir(d) 
-                    if f.endswith('.xlsx') and not f.endswith('.crdownload') and not f.endswith('.tmp')
-                ]
-                for f in files:
-                    if f not in initial_files and (time.time() - os.path.getmtime(f) < 300):
-                        return f
-        time.sleep(2)
-    return None
-
-# -----------------------------------------------------------------------------
-# 1. Klik Tanggal Hari Ini (Today) pada Input Controls
-# -----------------------------------------------------------------------------
-def fill_date_out_today(driver, label, index=0):
-    print(f"  📅  {label} → Klik & Pilih Hari Ini (Today)")
-    
-    driver.switch_to.default_content()
-    iframes = driver.find_elements(By.TAG_NAME, "iframe")
-    for iframe in iframes:
-        try:
-            driver.switch_to.frame(iframe)
-            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"):
-                break
-        except:
-            driver.switch_to.default_content()
-    
-    try:
-        driver.execute_script("""
-            var index = arguments[0];
-            var inps = document.querySelectorAll('input.date.hasDatepicker');
-            var inp = inps[index];
-            if (!inp) return false;
-            
-            inp.scrollIntoView({block:'center'});
-            inp.click();
-            
-            var trigger = inp.nextElementSibling;
-            if (trigger) { trigger.click(); }
-            
-            if (window.jQuery && $.datepicker) {
-                try {
-                    $(inp).datepicker('setDate', '+0d');
-                    $(inp).trigger('change').trigger('blur');
-                } catch(e) {}
-            }
-            return true;
-        """, index)
-        
-        time.sleep(1)
-        
-        driver.execute_script("""
-            var todayBtn = document.querySelector('.ui-datepicker-current') || 
-                           document.querySelector('.ui-datepicker-today a') ||
-                           Array.from(document.querySelectorAll('button, a')).find(el => (el.innerText || '').trim().toLowerCase() === 'today');
-            if (todayBtn) {
-                todayBtn.click();
-            } else {
-                var activeDay = document.querySelector('.ui-datepicker-days-cell-over a, .ui-state-highlight');
-                if (activeDay) activeDay.click();
-            }
-        """)
-        
-        time.sleep(1)
-        print(f"  ✅  Berhasil memilih tanggal hari ini untuk {label}.")
-        return True
-        
-    except Exception as e: 
-        print(f"  ⚠️  Error klik tanggal hari ini: {e}")
-        return False
-
-# -----------------------------------------------------------------------------
-# 2. Trigger Apply Robust
-# -----------------------------------------------------------------------------
-def trigger_jasper_apply_robust(driver):
-    print("  🔵 Memproses Klik Apply ...")
-    
-    driver.switch_to.default_content()
-    iframes = driver.find_elements(By.TAG_NAME, "iframe")
-    
-    clicked = False
-    js_apply_script = """
-        var btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
-        var applyBtn = btns.find(b => {
-            var txt = (b.innerText || b.value || '').trim().toLowerCase();
-            var id = (b.id || '').toLowerCase();
-            var name = (b.getAttribute('name') || '').toLowerCase();
-            return (id.includes('apply') || name.includes('apply') || txt.includes('apply')) && !b.disabled;
-        });
-
-        if (applyBtn) {
-            applyBtn.scrollIntoView({block: 'center'});
-            applyBtn.removeAttribute('disabled');
-            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                applyBtn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-            });
-            if (window.jQuery) { $(applyBtn).trigger('click'); }
-            return true;
-        }
-        return false;
-    """
-
-    try: 
-        clicked = driver.execute_script(js_apply_script)
-    except: 
-        pass
-    
-    if not clicked:
-        for iframe in iframes:
-            try:
-                driver.switch_to.default_content()
-                driver.switch_to.frame(iframe)
-                if driver.execute_script(js_apply_script):
-                    clicked = True
-                    break
-            except: 
-                continue
-
-    if not clicked:
-        driver.switch_to.default_content()
-        try:
-            if 'click_apply_dialog' in globals():
-                click_apply_dialog(driver)
-            else:
-                btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'APPLY', 'apply'), 'apply')]")
-                driver.execute_script("arguments[0].click();", btn)
-        except Exception as e:
-            print(f"  ⚠️ Fallback Apply Error: {e}")
-
-# -----------------------------------------------------------------------------
-# 3. Export XLSX Robust (Perbaikan Frame & Deteksi File)
-# -----------------------------------------------------------------------------
-def force_export_xlsx(driver, retries=10, delay=10):
-    print("  📤 Membuka Export Dropdown & Download XLSX ...")
-    
-    initial_files = set()
-    download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
-    for d in download_dirs:
-        if d and os.path.exists(d):
-            initial_files.update([os.path.join(d, f) for f in os.listdir(d) if f.endswith('.xlsx')])
-    
-    for attempt in range(1, retries + 1):
-        driver.switch_to.default_content()
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        contexts = [None] + iframes
-        
-        exported = False
-        for ctx in contexts:
-            driver.switch_to.default_content()
-            if ctx is not None:
-                try:
-                    driver.switch_to.frame(ctx)
-                except:
-                    continue
-            
-            # Bersihkan overlay penghalang
-            driver.execute_script("""
-                var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
-                overlays.forEach(function(el) { el.remove(); });
-            """)
-            time.sleep(1)
-            
-            # 1. Klik Tombol Export Utama
-            button_clicked = driver.execute_script("""
-                var exportBtn = document.querySelector('#exporter .button') || 
-                                document.querySelector('#export .button') ||
-                                document.querySelector('[title*="Export"]') ||
-                                document.querySelector('.jr-mButtonExport') ||
-                                document.querySelector('#exportElement');
-                                
-                if (exportBtn && !exportBtn.disabled) {
-                    exportBtn.click();
-                    if (window.jQuery) $(exportBtn).trigger('click');
-                    return true;
-                }
-                return false;
-            """)
-            
-            if button_clicked:
-                time.sleep(2)  # Jeda agar dropdown menu merender
-                
-                # 2. Klik Opsi XLSX
-                option_clicked = driver.execute_script("""
-                    var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
-                                  document.querySelector('a[href*="xlsx"]') || 
-                                  Array.from(document.querySelectorAll('li, a, option, span')).find(el => 
-                                      (el.innerText || '').toUpperCase().includes('XLSX') || 
-                                      (el.innerText || '').toUpperCase().includes('EXCEL')
-                                  );
-                                  
-                    if (xlsxOpt) {
-                        xlsxOpt.click();
-                        if (window.jQuery) $(xlsxOpt).trigger('click');
-                        return true;
-                    }
-                    return false;
-                """)
-                
-                if option_clicked:
-                    exported = True
-                    break
-        
-        if exported:
-            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
-            filepath = get_latest_download_file(initial_files=initial_files, timeout=90)
-            if filepath:
-                return filepath
-            else:
-                print("  ⚠️ Ekspor diklik, tetapi file tidak terdeteksi di folder unduhan.")
-                return None
-
-        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
-        time.sleep(delay)
-        
-    return None
-
-# -----------------------------------------------------------------------------
-# 4. Main Function — CELL 7
-# -----------------------------------------------------------------------------
 def run_cell7(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 7 — Outstanding Detail")
@@ -1625,53 +1014,31 @@ def run_cell7(driver, gc):
     try:
         driver.get(BOT78IP_REPORT_URL)
         print("  ⏳  45s tunggu load ..."); time.sleep(45)
-        
         try: wait_ready(driver)
         except NameError: pass
         
         print("\n  📋  Input Controls ...")
-        
-        # Langkah 1: Klik Tanggal Akhir Hari Ini
-        fill_date_out_today(driver, "Tanggal Akhir", 0)
-        
-        time.sleep(3)
-        
-        # Langkah 2: Klik Apply
+        fill_date_out_today(driver, "Tanggal Akhir", 0); time.sleep(3)
         trigger_jasper_apply_robust(driver)
-        
-        # Tunggu proses report Jasper selesai
-        try: 
-            wait_loading(driver, timeout=1200)
-        except TypeError:
-            wait_loading(driver)
-        except NameError: 
-            print("  ⏳ Tunggu rendering laporan 60 detik ...")
-            time.sleep(60)
-        
+        wait_loading(driver, timeout=1200)
         time.sleep(10)
         
-        # Langkah 3: Export & Upload (Retries=10, Delay=10s)
         downloaded = force_export_xlsx(driver, retries=10, delay=10)
+        
         if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding_Detail")
             url = save_to_gsheet(gc, downloaded, "OUT1", "Data OUT Detail")
-            
-            # Update waktu tarikan ke GSheet
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
                 worksheet = sh.worksheet("OUT1")
-                
                 worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
-            except Exception as e:
-                print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            
+            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
             bot_footer(exp, url, "OUT1")
-        else:
-            print("\n  ⚠️  Download gagal atau path file string tidak valid")
-    except Exception as e: 
-        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+        else: print("\n  ⚠️  Download gagal atau path file string tidak valid")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+
 # =============================================================================
 # CELL 5 — iDempiere ERP → tab "IP_iDempiere"
 # =============================================================================
@@ -1694,22 +1061,17 @@ def convert_xls_to_xlsx(xls_path):
 
 def fill_text_field_erp(driver, c5_wait, label_text, text_value):
     print(f"   → Mengisi {label_text}: {text_value}")
-    xpath = (f"//span[contains(text(), '{label_text}')]"
-             f"/ancestor::tr[1]//input[not(@type='hidden')]")
+    xpath = (f"//span[contains(text(), '{label_text}')]/ancestor::tr[1]//input[not(@type='hidden')]")
     for attempt in range(3):
         try:
             inputs = driver.find_elements(By.XPATH, xpath)
             if not inputs:
-                inputs = driver.find_elements(By.XPATH,
-                    f"//span[contains(text(), '{label_text}')]"
-                    f"/following::input[not(@type='hidden')]")
+                inputs = driver.find_elements(By.XPATH, f"//span[contains(text(), '{label_text}')]/following::input[not(@type='hidden')]")
             if not inputs: print(f"   ⚠️ Gagal: {label_text} tidak ditemukan."); return
             inp = inputs[0]
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", inp)
-            time.sleep(0.5)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", inp); time.sleep(0.5)
             inp.click(); inp.clear(); time.sleep(0.5)
-            for char in text_value:
-                inp.send_keys(char); time.sleep(0.15)
+            for char in text_value: inp.send_keys(char); time.sleep(0.15)
             time.sleep(3); inp.send_keys(Keys.ENTER); time.sleep(2); return
         except Exception:
             print(f"   🔄 Retry {label_text} ({attempt+1})..."); time.sleep(2)
@@ -1717,53 +1079,38 @@ def fill_text_field_erp(driver, c5_wait, label_text, text_value):
 def select_date_erp(driver, label_text, index):
     print(f"   → Memilih {label_text} (kotak ke-{index}): Hari Ini")
     xpath = (
-        f"//span[contains(text(), '{label_text}')]"
-        f"/ancestor::tr[1]//i[contains(@class, 'z-icon-calendar') "
+        f"//span[contains(text(), '{label_text}')]/ancestor::tr[1]//i[contains(@class, 'z-icon-calendar') "
         f"or contains(@class, 'datebox-icon')] | "
-        f"//span[contains(text(), '{label_text}')]"
-        f"/ancestor::tr[1]//a[contains(@class, 'datebox-button')]"
+        f"//span[contains(text(), '{label_text}')]/ancestor::tr[1]//a[contains(@class, 'datebox-button')]"
     )
     try:
         icons = driver.find_elements(By.XPATH, xpath)
         if not icons:
-            icons = driver.find_elements(By.XPATH,
-                f"//span[contains(text(), '{label_text}')]"
-                f"/following::i[contains(@class, 'z-icon-calendar') "
-                f"or contains(@class, 'datebox-icon')]")
+            icons = driver.find_elements(By.XPATH, f"//span[contains(text(), '{label_text}')]/following::i[contains(@class, 'z-icon-calendar') or contains(@class, 'datebox-icon')]")
         target_icon = icons[index - 1]
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_icon)
         time.sleep(0.5); driver.execute_script("arguments[0].click();", target_icon); time.sleep(1.5)
         today_day_str = str(datetime.now().day)
         xpath_tgl = (
             f"//div[contains(@class, 'calendar') or contains(@class, 'popup')]"
-            f"//td[normalize-space(text())='{today_day_str}' "
-            f"and not(contains(@class, 'disd')) "
-            f"and not(contains(@class, 'outside'))]"
+            f"//td[normalize-space(text())='{today_day_str}' and not(contains(@class, 'disd')) and not(contains(@class, 'outside'))]"
         )
         for cell in driver.find_elements(By.XPATH, xpath_tgl):
-            if cell.is_displayed():
-                driver.execute_script("arguments[0].click();", cell); break
+            if cell.is_displayed(): driver.execute_script("arguments[0].click();", cell); break
         time.sleep(1.5)
-    except Exception as e:
-        print(f"   ⚠️ Gagal memilih tanggal {label_text}: {e}")
+    except Exception as e: print(f"   ⚠️ Gagal memilih tanggal {label_text}: {e}")
 
 def run_cell5(driver, gc):
     print("\n" + "="*60)
     print("  🤖  CELL 5 — iDempiere ERP → tab 'IP_iDempiere'")
     print("="*60)
-
-    # Alihkan CDP ke folder ERP
     try:
-        driver.execute_cdp_cmd("Page.setDownloadBehavior",
-            {"behavior": "allow", "downloadPath": C5_DOWNLOAD_DIR})
+        driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": C5_DOWNLOAD_DIR})
         print(f"  ✅  CDP dialihkan → {C5_DOWNLOAD_DIR}")
-    except Exception as e:
-        print(f"  ⚠️  CDP: {e}")
+    except Exception as e: print(f"  ⚠️  CDP: {e}")
 
     c5_wait = WebDriverWait(driver, 20)
-
     try:
-        # 1. LOGIN ERP
         print("  🌐  Membuka halaman login iDempiere ...")
         driver.get(ERP_URL); time.sleep(5)
         print("  🔑  Proses Login ...")
@@ -1773,27 +1120,19 @@ def run_cell5(driver, gc):
         pass_input = c5_wait.until(EC.element_to_be_clickable((By.XPATH, pass_xpath)))
         user_input.clear(); user_input.send_keys(ERP_USER)
         pass_input.clear(); pass_input.send_keys(ERP_PASS)
-        login_btn = driver.find_element(By.XPATH,
-            "//button[contains(., 'OK')] | //div[contains(@class, 'login-btn')]")
+        login_btn = driver.find_element(By.XPATH, "//button[contains(., 'OK')] | //div[contains(@class, 'login-btn')]")
         driver.execute_script("arguments[0].click();", login_btn)
         print("  ⏳  Menunggu workspace (15s) ..."); time.sleep(15)
 
-        # 2. BUKA MENU TRANSACTION DETAIL
         print("  📂  Membuka menu Transaction Detail ...")
-        menu_item = c5_wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[normalize-space(text())='Transaction Detail']")))
+        menu_item = c5_wait.until(EC.element_to_be_clickable((By.XPATH, "//span[normalize-space(text())='Transaction Detail']")))
         driver.execute_script("arguments[0].click();", menu_item); time.sleep(8)
 
-        # 3. PILIH TANGGAL
         select_date_erp(driver, "Movement Date", 1)
         select_date_erp(driver, "Movement Date", 2)
 
-        # 4. KLIK OK
         print("  🚀  Klik tombol OK ...")
-        ok_xpath = (
-            "//button[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK') "
-            "or @title='OK'] | //a[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK')]"
-        )
+        ok_xpath = "//button[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK') or @title='OK'] | //a[contains(translate(normalize-space(.), 'ok', 'OK'), 'OK')]"
         clicked = False
         for btn in reversed(driver.find_elements(By.XPATH, ok_xpath)):
             if btn.is_displayed():
@@ -1803,41 +1142,28 @@ def run_cell5(driver, gc):
         if not clicked: raise Exception("Tombol OK tidak ditemukan.")
         print("  ⏳  Generate report (20s) ..."); time.sleep(20)
 
-        # 6. FORMAT XLS & DOWNLOAD
         print("  🔄  Format → XLS ...")
         pdf_selects = driver.find_elements(By.XPATH, "//select[option[contains(text(), 'PDF')]]")
         if pdf_selects:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", pdf_selects[0])
             time.sleep(1); Select(pdf_selects[0]).select_by_visible_text("XLS")
         else:
-            pdf_icon_xpath = (
-                "//input[@value='PDF']/following-sibling::* | "
-                "//span[text()='PDF']/ancestor::*[contains(@class, 'combo')]//i"
-            )
+            pdf_icon_xpath = "//input[@value='PDF']/following-sibling::* | //span[text()='PDF']/ancestor::*[contains(@class, 'combo')]//i"
             pdf_btn = c5_wait.until(EC.element_to_be_clickable((By.XPATH, pdf_icon_xpath)))
             driver.execute_script("arguments[0].click();", pdf_btn); time.sleep(1.5)
-            xls_opt = c5_wait.until(EC.element_to_be_clickable((By.XPATH,
-                "//li[text()='XLS'] | //span[text()='XLS'] | "
-                "//div[contains(@class, 'comboitem') and text()='XLS']")))
+            xls_opt = c5_wait.until(EC.element_to_be_clickable((By.XPATH, "//li[text()='XLS'] | //span[text()='XLS'] | //div[contains(@class, 'comboitem') and text()='XLS']")))
             driver.execute_script("arguments[0].click();", xls_opt)
         print("  ✅  Format → XLS"); time.sleep(3)
 
         print("  📥  Klik 'Save to File' ...")
-        save_btn_xpath = (
-            "//*[contains(text(), 'Save to File')]/ancestor-or-self::button | "
-            "//button[contains(., 'Save to File')]"
-        )
+        save_btn_xpath = "//*[contains(text(), 'Save to File')]/ancestor-or-self::button | //button[contains(., 'Save to File')]"
         save_btns = driver.find_elements(By.XPATH, save_btn_xpath)
-        if save_btns:
-            driver.execute_script("arguments[0].click();", save_btns[0])
-        else:
-            driver.find_element(By.XPATH, "//*[text()='Save to File']").click()
+        if save_btns: driver.execute_script("arguments[0].click();", save_btns[0])
+        else: driver.find_element(By.XPATH, "//*[text()='Save to File']").click()
         print("  ✅  Save to File diklik"); time.sleep(10)
 
-    except Exception as e:
-        print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
-    # 7. KONVERSI + UPLOAD (di luar try agar selalu dijalankan)
     try:
         files = os.listdir(C5_DOWNLOAD_DIR)
         if files:
@@ -1849,10 +1175,8 @@ def run_cell5(driver, gc):
             exp = save_to_export(latest_file, "MonitorSuratJalan_IP_iDempiere")
             url = save_to_gsheet(gc, latest_file, "IP_iDempiere", "Monitor SJ IP (iDempiere)")
             bot_footer(exp, url, "IP_iDempiere")
-        else:
-            print("\n  ⚠️  Tidak ada file di folder download ERP.")
-    except Exception as e:
-        print(f"\n  ⚠️  Gagal konversi/upload: {e}")
+        else: print("\n  ⚠️  Tidak ada file di folder download ERP.")
+    except Exception as e: print(f"\n  ⚠️  Gagal konversi/upload: {e}")
 
 # =============================================================================
 # MAIN — 1 driver, 1 login, 6 tab
@@ -1860,18 +1184,12 @@ def run_cell5(driver, gc):
 def run_all_shared(gc, cells):
     driver = make_driver(DOWNLOAD_DIR)
     try:
-        # Set CDP download dir awal
         try:
-            driver.execute_cdp_cmd("Page.setDownloadBehavior",
-                {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+            driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
             print(f"  ✅  CDP download path: {DOWNLOAD_DIR}")
-        except Exception as e:
-            print(f"  ⚠️  CDP: {e}")
+        except Exception as e: print(f"  ⚠️  CDP: {e}")
 
-        # LOGIN 1x untuk cell 2/3/4/6/7 (Jasper)
         jasper_cells = [c for c in cells if c in (2, 3, 4 , 6 , 7)]
-        erp_cells    = [c for c in cells if c == 5]
-
         if jasper_cells:
             print("\n" + "="*60)
             print("  🔑  LOGIN JASPER (1x untuk semua Cell 2/3/4/6/7)")
@@ -1879,13 +1197,9 @@ def run_all_shared(gc, cells):
             do_login(driver)
 
         first_tab = driver.window_handles[0]
-
         for cell in cells:
             if cell in (2, 3, 4 ,6 ,7):
-                # Pastikan CDP kembali ke jasper downloads
-                try:
-                    driver.execute_cdp_cmd("Page.setDownloadBehavior",
-                        {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+                try: driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
                 except: pass
                 open_new_tab(driver)
                 if   cell == 2: run_cell2(driver, gc)
@@ -1895,10 +1209,9 @@ def run_all_shared(gc, cells):
                 elif cell == 7: run_cell7(driver, gc)
                 driver.switch_to.window(first_tab)
                 print(f"  ↩️   Kembali ke tab utama")
-
             elif cell == 5:
                 open_new_tab(driver)
-                run_cell5(driver, gc)   # CDP dialihkan di dalam run_cell5
+                run_cell5(driver, gc)
                 driver.switch_to.window(first_tab)
                 print(f"  ↩️   Kembali ke tab utama")
 
@@ -1907,23 +1220,17 @@ def run_all_shared(gc, cells):
         except: pass
         print("\n  🔒  Browser ditutup (1x)")
 
-
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cell", type=int, action="append", dest="cells",
-                        help="Cell yang dijalankan (bisa diulang: --cell 2 --cell 3)")
-    parser.add_argument("--deadline", type=str, default="",
-                        help="Target selesai dalam format HH:MM WIB, e.g. 14:30")
+    parser.add_argument("--cell", type=int, action="append", dest="cells", help="Cell yang dijalankan (bisa diulang: --cell 2 --cell 3)")
+    parser.add_argument("--deadline", type=str, default="", help="Target selesai dalam format HH:MM WIB, e.g. 14:30")
     args = parser.parse_args()
 
     cells = sorted(set(args.cells)) if args.cells else [2, 3, 4, 5 , 6 ,7]
     valid = [c for c in cells if c in (2, 3, 4, 5 ,6 ,7)]
-    if not valid:
-        print("❌ Tidak ada cell valid (hanya 2–5)"); sys.exit(1)
+    if not valid: print("❌ Tidak ada cell valid (hanya 2–5)"); sys.exit(1)
 
-    # Deadline mode
     deadline_dt = None
     if args.deadline:
         try:
@@ -1931,42 +1238,30 @@ if __name__ == "__main__":
             now = datetime.now(WIB)
             deadline_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if deadline_dt < now:
-                print(f"⚠️ Deadline {args.deadline} sudah lewat, abaikan deadline.")
-                deadline_dt = None
+                print(f"⚠️ Deadline {args.deadline} sudah lewat, abaikan deadline."); deadline_dt = None
             else:
-                print(f"🕐 DEADLINE MODE: target selesai {args.deadline} WIB "
-                      f"({int((deadline_dt - now).total_seconds() / 60)} menit lagi)")
+                print(f"🕐 DEADLINE MODE: target selesai {args.deadline} WIB ({int((deadline_dt - now).total_seconds() / 60)} menit lagi)")
         except ValueError:
             print(f"⚠️ Format deadline salah '{args.deadline}', abaikan."); deadline_dt = None
 
     print(f"🤖 JasperBot START — {datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S WIB')}")
     print(f"   Cell    : {valid}")
     print(f"   Mode    : 1 browser → 1 login → {len(valid)} tab")
-
     gc = init_gc()
 
     if deadline_dt:
-        # Jalankan cell satu per satu, cek deadline setelah tiap cell
         driver = make_driver(DOWNLOAD_DIR)
-        try:
-            driver.execute_cdp_cmd("Page.setDownloadBehavior",
-                {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+        try: driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
         except: pass
 
         jasper_cells = [c for c in valid if c in (2, 3, 4, 6, 7)]
-        erp_cells    = [c for c in valid if c == 5]
-
-        if jasper_cells:
-            do_login(driver)
-
+        if jasper_cells: do_login(driver)
         first_tab = driver.window_handles[0]
 
         for cell in valid:
             if datetime.now(WIB) >= deadline_dt:
                 print(f"\n⏰ Deadline tercapai, cell {cell}+ dilewati."); break
-            try:
-                driver.execute_cdp_cmd("Page.setDownloadBehavior",
-                    {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
+            try: driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": DOWNLOAD_DIR})
             except: pass
             open_new_tab(driver)
             if   cell == 2: run_cell2(driver, gc)
@@ -1976,7 +1271,6 @@ if __name__ == "__main__":
             elif cell == 6: run_cell6(driver, gc)
             elif cell == 7: run_cell7(driver, gc)
             driver.switch_to.window(first_tab)
-
         try: driver.quit()
         except: pass
     else:
