@@ -908,9 +908,11 @@ def run_cell4(driver, gc):
         else: print("\n  ⚠️  Download gagal")
     except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
+```python
 # =============================================================================
 # CELL 6 — Outstanding → tab "OUT"
 # =============================================================================
+
 BOT76IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
     "&ParentFolderUri=%2FiDempiere%2FInventory%2FMonitor_Trx"
@@ -918,88 +920,635 @@ BOT76IP_REPORT_URL = (
     "&standAlone=true"
 )
 
-def fill_date_out_today(driver, label, index=0):
+
+# =============================================================================
+# HELPER — Pilih tanggal hari ini
+# =============================================================================
+
+def fill_date_out_today(driver, label="Tanggal Akhir", index=0):
+
     print(f"  📅  {label} → Klik & Pilih Hari Ini (Today)")
-    driver.switch_to.default_content()
-    iframes = driver.find_elements(By.TAG_NAME, "iframe")
-    for iframe in iframes:
-        try:
-            driver.switch_to.frame(iframe)
-            if driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker, .jr-mDialog input"): break
-        except: driver.switch_to.default_content()
-    
+
     try:
-        driver.execute_script("""
-            var index = arguments[0];
-            var inps = document.querySelectorAll('input.date.hasDatepicker');
-            var inp = inps[index];
-            if (!inp) return false;
-            
-            inp.scrollIntoView({block:'center'});
-            inp.click();
-            
-            var trigger = inp.nextElementSibling;
-            if (trigger) { trigger.click(); }
-            
-            if (window.jQuery && $.datepicker) {
-                try {
-                    $(inp).datepicker('setDate', '+0d');
-                    $(inp).trigger('change').trigger('blur');
-                } catch(e) {}
-            }
-            return true;
-        """, index)
-        time.sleep(1)
-        driver.execute_script("""
-            var todayBtn = document.querySelector('.ui-datepicker-current') || 
-                           document.querySelector('.ui-datepicker-today a') ||
-                           Array.from(document.querySelectorAll('button, a')).find(el => (el.innerText || '').trim().toLowerCase() === 'today');
-            if (todayBtn) { todayBtn.click(); } else {
-                var activeDay = document.querySelector('.ui-datepicker-days-cell-over a, .ui-state-highlight');
-                if (activeDay) activeDay.click();
-            }
-        """)
-        time.sleep(1)
-        print(f"  ✅  Berhasil memilih tanggal hari ini untuk {label}.")
-        return True
-    except Exception as e: 
-        print(f"  ⚠️  Error klik tanggal hari ini: {e}"); return False
+        driver.switch_to.default_content()
+
+        # ---------------------------------------------------------------------
+        # Cari input tanggal di MAIN document + iframe
+        # ---------------------------------------------------------------------
+
+        contexts = [None]
+
+        try:
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+
+            for iframe in iframes:
+                contexts.append(iframe)
+
+        except Exception:
+            pass
+
+        target_found = False
+
+        for ctx in contexts:
+
+            try:
+
+                driver.switch_to.default_content()
+
+                if ctx is not None:
+                    driver.switch_to.frame(ctx)
+
+                inputs = driver.find_elements(
+                    By.CSS_SELECTOR,
+                    "input.date.hasDatepicker"
+                )
+
+                if not inputs:
+                    inputs = driver.find_elements(
+                        By.CSS_SELECTOR,
+                        ".jr-mDialog input.date"
+                    )
+
+                if not inputs:
+                    continue
+
+                if index >= len(inputs):
+                    continue
+
+                inp = inputs[index]
+
+                if not inp.is_displayed():
+                    continue
+
+                # -------------------------------------------------------------
+                # Scroll ke input
+                # -------------------------------------------------------------
+
+                driver.execute_script("""
+                    arguments[0].scrollIntoView({
+                        block: 'center',
+                        inline: 'center'
+                    });
+                """, inp)
+
+                time.sleep(0.5)
+
+                # -------------------------------------------------------------
+                # Klik input
+                # -------------------------------------------------------------
+
+                try:
+                    inp.click()
+                except:
+                    driver.execute_script(
+                        "arguments[0].click();",
+                        inp
+                    )
+
+                time.sleep(0.8)
+
+                # -------------------------------------------------------------
+                # Klik datepicker trigger jika ada
+                # -------------------------------------------------------------
+
+                try:
+
+                    trigger = inp.find_element(
+                        By.XPATH,
+                        "./following-sibling::*[1]"
+                    )
+
+                    if trigger.is_displayed():
+
+                        try:
+                            trigger.click()
+                        except:
+                            driver.execute_script(
+                                "arguments[0].click();",
+                                trigger
+                            )
+
+                except:
+                    pass
+
+                time.sleep(0.8)
+
+                # -------------------------------------------------------------
+                # Set Today menggunakan jQuery datepicker
+                # -------------------------------------------------------------
+
+                try:
+
+                    result = driver.execute_script("""
+                        var inp = arguments[0];
+
+                        try {
+
+                            if (
+                                window.jQuery &&
+                                window.jQuery.fn &&
+                                window.jQuery.fn.datepicker
+                            ) {
+
+                                window.jQuery(inp)
+                                    .datepicker('setDate', new Date());
+
+                                window.jQuery(inp)
+                                    .trigger('change');
+
+                                window.jQuery(inp)
+                                    .trigger('blur');
+
+                                return true;
+                            }
+
+                        } catch(e) {}
+
+                        return false;
+                    """, inp)
+
+                    if result:
+                        print(
+                            f"  ✅  Tanggal hari ini berhasil "
+                            f"di-set melalui datepicker."
+                        )
+
+                except:
+                    pass
+
+                # -------------------------------------------------------------
+                # Fallback — klik tombol Today
+                # -------------------------------------------------------------
+
+                time.sleep(0.5)
+
+                today_clicked = False
+
+                today_selectors = [
+
+                    ".ui-datepicker-current",
+
+                    ".ui-datepicker-today a",
+
+                    ".ui-datepicker-buttonpane button",
+
+                    "button.ui-datepicker-current",
+
+                    "a.ui-datepicker-current",
+
+                ]
+
+                for selector in today_selectors:
+
+                    try:
+
+                        elements = driver.find_elements(
+                            By.CSS_SELECTOR,
+                            selector
+                        )
+
+                        for el in elements:
+
+                            if not el.is_displayed():
+                                continue
+
+                            txt = (
+                                el.text or ""
+                            ).strip().lower()
+
+                            if (
+                                "today" in txt
+                                or
+                                "hari ini" in txt
+                                or
+                                selector in [
+                                    ".ui-datepicker-current",
+                                    ".ui-datepicker-today a"
+                                ]
+                            ):
+
+                                try:
+                                    el.click()
+                                except:
+                                    driver.execute_script(
+                                        "arguments[0].click();",
+                                        el
+                                    )
+
+                                today_clicked = True
+                                break
+
+                        if today_clicked:
+                            break
+
+                    except:
+                        continue
+
+                # -------------------------------------------------------------
+                # Pastikan tanggal terisi
+                # -------------------------------------------------------------
+
+                time.sleep(0.8)
+
+                value = ""
+
+                try:
+                    value = inp.get_attribute("value") or ""
+                except:
+                    pass
+
+                if value.strip():
+
+                    print(
+                        f"  ✅  Berhasil memilih tanggal hari ini "
+                        f"untuk {label}: {value}"
+                    )
+
+                    target_found = True
+                    break
+
+                # -------------------------------------------------------------
+                # Fallback terakhir — isi value langsung
+                # -------------------------------------------------------------
+
+                try:
+
+                    driver.execute_script("""
+                        var inp = arguments[0];
+
+                        var d = new Date();
+
+                        var yyyy = d.getFullYear();
+                        var mm = String(
+                            d.getMonth() + 1
+                        ).padStart(2, '0');
+
+                        var dd = String(
+                            d.getDate()
+                        ).padStart(2, '0');
+
+                        var value =
+                            dd + '/' +
+                            mm + '/' +
+                            yyyy;
+
+                        var setter =
+                            Object.getOwnPropertyDescriptor(
+                                HTMLInputElement.prototype,
+                                'value'
+                            ).set;
+
+                        setter.call(inp, value);
+
+                        inp.dispatchEvent(
+                            new Event(
+                                'input',
+                                {bubbles: true}
+                            )
+                        );
+
+                        inp.dispatchEvent(
+                            new Event(
+                                'change',
+                                {bubbles: true}
+                            )
+                        );
+
+                        inp.dispatchEvent(
+                            new Event(
+                                'blur',
+                                {bubbles: true}
+                            )
+                        );
+                    """, inp)
+
+                    time.sleep(0.5)
+
+                    value = inp.get_attribute("value") or ""
+
+                    if value.strip():
+
+                        print(
+                            f"  ✅  Tanggal diisi melalui fallback: "
+                            f"{value}"
+                        )
+
+                        target_found = True
+                        break
+
+                except Exception as e:
+
+                    print(
+                        f"  ⚠️  Fallback tanggal gagal: {e}"
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"  ⚠️  Context tanggal gagal: {e}"
+                )
+
+        driver.switch_to.default_content()
+
+        if target_found:
+            return True
+
+        print(
+            f"  ❌  Input {label} tidak ditemukan "
+            f"atau tanggal tidak berhasil diisi."
+        )
+
+        return False
+
+    except Exception as e:
+
+        try:
+            driver.switch_to.default_content()
+        except:
+            pass
+
+        print(
+            f"  ❌  Error tanggal {label}: {e}"
+        )
+
+        return False
+
+
+# =============================================================================
+# CELL 6 RUNNER
+# =============================================================================
 
 def run_cell6(driver, gc):
-    print("\n" + "="*60)
-    print("  🤖  CELL 6 — Outstanding")
-    print("="*60)
-    try:
-        driver.get(BOT76IP_REPORT_URL)
-        print("  ⏳  45s tunggu load ..."); time.sleep(45)
-        try: wait_ready(driver)
-        except NameError: pass
-        
-        print("\n  📋  Input Controls ...")
-        fill_date_out_today(driver, "Tanggal Akhir", 0); time.sleep(3)
-        trigger_jasper_apply_robust(driver)
-        wait_loading(driver, timeout=1200)
-        time.sleep(10)
-        
-        downloaded = force_export_xlsx(driver, retries=10, delay=10)
-        
-        if downloaded and isinstance(downloaded, str):
-            exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding")
-            url = save_to_gsheet(gc, downloaded, "OUT", "Data OUT")
-            try:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                sh = gc.open_by_url(url)
-                worksheet = sh.worksheet("OUT")
-                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
-                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
-            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            bot_footer(exp, url, "OUT")
-        else: print("\n  ⚠️  Download gagal atau path file string tidak valid")
-    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
+    print("\n" + "=" * 60)
+    print("  🤖  CELL 6 — Outstanding")
+    print("=" * 60)
+
+    try:
+
+        # ---------------------------------------------------------------------
+        # 1. Buka report
+        # ---------------------------------------------------------------------
+
+        print("\n  🌐 Membuka report Outstanding...")
+
+        driver.switch_to.default_content()
+
+        driver.get(BOT76IP_REPORT_URL)
+
+        print("  ⏳  45s tunggu load ...")
+        time.sleep(45)
+
+        # ---------------------------------------------------------------------
+        # 2. Pastikan document siap
+        # ---------------------------------------------------------------------
+
+        try:
+            wait_ready(driver)
+        except NameError:
+            pass
+        except Exception as e:
+            print(
+                f"  ⚠️ wait_ready: {e}"
+            )
+
+        # ---------------------------------------------------------------------
+        # 3. Input controls
+        # ---------------------------------------------------------------------
+
+        print("\n  📋  Input Controls ...")
+
+        date_ok = fill_date_out_today(
+            driver,
+            label="Tanggal Akhir",
+            index=0
+        )
+
+        if not date_ok:
+
+            print(
+                "  ❌ Tanggal Akhir gagal diisi."
+            )
+
+            return None
+
+        time.sleep(2)
+
+        # ---------------------------------------------------------------------
+        # 4. APPLY
+        # ---------------------------------------------------------------------
+
+        print("\n  🔵 Memproses Klik Apply ...")
+
+        driver.switch_to.default_content()
+
+        trigger_jasper_apply_robust(driver)
+
+        # ---------------------------------------------------------------------
+        # 5. Tunggu loading Jasper
+        # ---------------------------------------------------------------------
+
+        wait_loading(
+            driver,
+            timeout=1200
+        )
+
+        # Beri waktu report benar-benar render
+        print(
+            "  ⏳ Tunggu report selesai render ..."
+        )
+
+        time.sleep(10)
+
+        # ---------------------------------------------------------------------
+        # 6. EXPORT XLSX
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  📤 Membuka Export Dropdown "
+            "& Download XLSX ..."
+        )
+
+        driver.switch_to.default_content()
+
+        downloaded = force_export_xlsx(
+            driver,
+            retries=5,
+            delay=5
+        )
+
+        # ---------------------------------------------------------------------
+        # 7. Validasi hasil download
+        # ---------------------------------------------------------------------
+
+        if not downloaded:
+
+            print(
+                "\n  ❌ Download Outstanding gagal."
+            )
+
+            print(
+                "  ⚠️ Tidak ada file XLS/XLSX yang "
+                "berhasil ditemukan."
+            )
+
+            return None
+
+        if not isinstance(downloaded, str):
+
+            print(
+                "\n  ❌ Path download tidak valid."
+            )
+
+            return None
+
+        if not os.path.exists(downloaded):
+
+            print(
+                "\n  ❌ File hasil export tidak ditemukan:"
+            )
+
+            print(
+                f"      {downloaded}"
+            )
+
+            return None
+
+        # ---------------------------------------------------------------------
+        # 8. Cek ukuran file
+        # ---------------------------------------------------------------------
+
+        file_size = os.path.getsize(downloaded)
+
+        if file_size <= 0:
+
+            print(
+                "\n  ❌ File export kosong."
+            )
+
+            return None
+
+        print(
+            f"\n  ✅ File XLSX ditemukan:"
+        )
+
+        print(
+            f"      {downloaded}"
+        )
+
+        print(
+            f"      Size: {file_size:,} bytes"
+        )
+
+        # ---------------------------------------------------------------------
+        # 9. Simpan file export lokal
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  💾 Menyimpan file export..."
+        )
+
+        exp = save_to_export(
+            downloaded,
+            "Monitor_Status_Dokumen_Outstanding"
+        )
+
+        # ---------------------------------------------------------------------
+        # 10. Upload ke Google Sheet
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  📊 Upload ke Google Sheet..."
+        )
+
+        url = save_to_gsheet(
+            gc,
+            downloaded,
+            "OUT",
+            "Data OUT"
+        )
+
+        # ---------------------------------------------------------------------
+        # 11. Update timestamp
+        # ---------------------------------------------------------------------
+
+        try:
+
+            now_str = datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
+            sh = gc.open_by_url(url)
+
+            worksheet = sh.worksheet("OUT")
+
+            worksheet.update_acell(
+                "C3",
+                f"Terakhir Ditarik: {now_str}"
+            )
+
+            print(
+                f"  🕒 Waktu tarikan dicatat "
+                f"di GSheet sel C3 "
+                f"({now_str})."
+            )
+
+        except Exception as e:
+
+            print(
+                f"  ⚠️ Gagal update cell waktu "
+                f"di GSheet: {e}"
+            )
+
+        # ---------------------------------------------------------------------
+        # 12. Footer
+        # ---------------------------------------------------------------------
+
+        bot_footer(
+            exp,
+            url,
+            "OUT"
+        )
+
+        print(
+            "\n  🎉 CELL 6 — OUTSTANDING BERHASIL"
+        )
+
+        return {
+            "downloaded": downloaded,
+            "exported": exp,
+            "gsheet_url": url,
+            "sheet": "OUT"
+        }
+
+    except Exception as e:
+
+        print(
+            f"\n  ❌ CELL 6 ERROR:"
+        )
+
+        print(
+            f"      {e}"
+        )
+
+        print(
+            traceback.format_exc()
+        )
+
+        try:
+            driver.switch_to.default_content()
+        except:
+            pass
+
+        return None
+```
+
+
+```python
 # =============================================================================
 # CELL 7 — Outstanding Detail → tab "OUT1"
 # =============================================================================
+
 BOT78IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
     "&ParentFolderUri=%2FiDempiere%2FInventory%2FMonitor_Trx"
@@ -1007,37 +1556,363 @@ BOT78IP_REPORT_URL = (
     "&standAlone=true"
 )
 
+
+# =============================================================================
+# CELL 7 RUNNER
+# =============================================================================
+
 def run_cell7(driver, gc):
-    print("\n" + "="*60)
+
+    print("\n" + "=" * 60)
     print("  🤖  CELL 7 — Outstanding Detail")
-    print("="*60)
+    print("=" * 60)
+
     try:
+
+        # ---------------------------------------------------------------------
+        # 1. Pastikan browser berada di MAIN document
+        # ---------------------------------------------------------------------
+
+        try:
+            driver.switch_to.default_content()
+        except:
+            pass
+
+        # ---------------------------------------------------------------------
+        # 2. Buka report Outstanding Detail
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  🌐 Membuka report Outstanding Detail..."
+        )
+
         driver.get(BOT78IP_REPORT_URL)
-        print("  ⏳  45s tunggu load ..."); time.sleep(45)
-        try: wait_ready(driver)
-        except NameError: pass
-        
-        print("\n  📋  Input Controls ...")
-        fill_date_out_today(driver, "Tanggal Akhir", 0); time.sleep(3)
-        trigger_jasper_apply_robust(driver)
-        wait_loading(driver, timeout=1200)
-        time.sleep(10)
-        
-        downloaded = force_export_xlsx(driver, retries=10, delay=10)
-        
-        if downloaded and isinstance(downloaded, str):
-            exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding_Detail")
-            url = save_to_gsheet(gc, downloaded, "OUT1", "Data OUT Detail")
+
+        print(
+            "  ⏳  45s tunggu load ..."
+        )
+
+        time.sleep(45)
+
+        # ---------------------------------------------------------------------
+        # 3. Tunggu document siap
+        # ---------------------------------------------------------------------
+
+        try:
+
+            wait_ready(driver)
+
+        except NameError:
+
+            pass
+
+        except Exception as e:
+
+            print(
+                f"  ⚠️ wait_ready: {e}"
+            )
+
+        # ---------------------------------------------------------------------
+        # 4. Input Controls
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  📋  Input Controls ..."
+        )
+
+        date_ok = fill_date_out_today(
+            driver,
+            label="Tanggal Akhir",
+            index=0
+        )
+
+        if not date_ok:
+
+            print(
+                "  ❌ Tanggal Akhir gagal diisi."
+            )
+
             try:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                sh = gc.open_by_url(url)
-                worksheet = sh.worksheet("OUT1")
-                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
-                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
-            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            bot_footer(exp, url, "OUT1")
-        else: print("\n  ⚠️  Download gagal atau path file string tidak valid")
-    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
+                driver.switch_to.default_content()
+            except:
+                pass
+
+            return None
+
+        # Berikan waktu agar Jasper menerima nilai tanggal
+        time.sleep(2)
+
+        # ---------------------------------------------------------------------
+        # 5. APPLY
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  🔵 Memproses Klik Apply ..."
+        )
+
+        try:
+            driver.switch_to.default_content()
+        except:
+            pass
+
+        trigger_jasper_apply_robust(driver)
+
+        # ---------------------------------------------------------------------
+        # 6. Tunggu loading Jasper selesai
+        # ---------------------------------------------------------------------
+
+        wait_loading(
+            driver,
+            timeout=1200
+        )
+
+        # ---------------------------------------------------------------------
+        # 7. Tunggu report benar-benar render
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  ⏳ Tunggu Outstanding Detail "
+            "selesai render ..."
+        )
+
+        time.sleep(10)
+
+        # ---------------------------------------------------------------------
+        # 8. EXPORT XLSX
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  📤 Membuka Export Dropdown "
+            "& Download XLSX ..."
+        )
+
+        try:
+            driver.switch_to.default_content()
+        except:
+            pass
+
+        downloaded = force_export_xlsx(
+            driver,
+            retries=5,
+            delay=5
+        )
+
+        # ---------------------------------------------------------------------
+        # 9. Validasi hasil download
+        # ---------------------------------------------------------------------
+
+        if not downloaded:
+
+            print(
+                "\n  ❌ Download Outstanding Detail gagal."
+            )
+
+            print(
+                "  ⚠️ Tidak ada file XLS/XLSX "
+                "yang berhasil ditemukan."
+            )
+
+            try:
+                driver.switch_to.default_content()
+            except:
+                pass
+
+            return None
+
+        if not isinstance(downloaded, str):
+
+            print(
+                "\n  ❌ Path download tidak valid."
+            )
+
+            try:
+                driver.switch_to.default_content()
+            except:
+                pass
+
+            return None
+
+        # ---------------------------------------------------------------------
+        # 10. Pastikan file benar-benar ada
+        # ---------------------------------------------------------------------
+
+        if not os.path.exists(downloaded):
+
+            print(
+                "\n  ❌ File hasil export "
+                "tidak ditemukan:"
+            )
+
+            print(
+                f"      {downloaded}"
+            )
+
+            try:
+                driver.switch_to.default_content()
+            except:
+                pass
+
+            return None
+
+        # ---------------------------------------------------------------------
+        # 11. Validasi ukuran file
+        # ---------------------------------------------------------------------
+
+        file_size = os.path.getsize(
+            downloaded
+        )
+
+        if file_size <= 0:
+
+            print(
+                "\n  ❌ File export kosong."
+            )
+
+            try:
+                driver.switch_to.default_content()
+            except:
+                pass
+
+            return None
+
+        print(
+            "\n  ✅ File XLSX ditemukan:"
+        )
+
+        print(
+            f"      {downloaded}"
+        )
+
+        print(
+            f"      Size: {file_size:,} bytes"
+        )
+
+        # ---------------------------------------------------------------------
+        # 12. Simpan hasil export
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  💾 Menyimpan file export..."
+        )
+
+        exp = save_to_export(
+            downloaded,
+            "Monitor_Status_Dokumen_Outstanding_Detail"
+        )
+
+        # ---------------------------------------------------------------------
+        # 13. Upload ke Google Sheet OUT1
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  📊 Upload ke Google Sheet..."
+        )
+
+        url = save_to_gsheet(
+            gc,
+            downloaded,
+            "OUT1",
+            "Data OUT Detail"
+        )
+
+        # ---------------------------------------------------------------------
+        # 14. Update timestamp OUT1
+        # ---------------------------------------------------------------------
+
+        try:
+
+            now_str = datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
+            sh = gc.open_by_url(url)
+
+            worksheet = sh.worksheet(
+                "OUT1"
+            )
+
+            worksheet.update_acell(
+                "C3",
+                f"Terakhir Ditarik: {now_str}"
+            )
+
+            print(
+                f"  🕒 Waktu tarikan dicatat "
+                f"di GSheet sel C3 "
+                f"({now_str})."
+            )
+
+        except Exception as e:
+
+            print(
+                "  ⚠️ Gagal update cell waktu "
+                f"di GSheet: {e}"
+            )
+
+        # ---------------------------------------------------------------------
+        # 15. Footer
+        # ---------------------------------------------------------------------
+
+        bot_footer(
+            exp,
+            url,
+            "OUT1"
+        )
+
+        # ---------------------------------------------------------------------
+        # 16. Sukses
+        # ---------------------------------------------------------------------
+
+        print(
+            "\n  🎉 CELL 7 — OUTSTANDING DETAIL "
+            "BERHASIL"
+        )
+
+        print(
+            f"  📁 Export : {exp}"
+        )
+
+        print(
+            f"  📊 Sheet  : OUT1"
+        )
+
+        print(
+            f"  🔗 URL    : {url}"
+        )
+
+        try:
+            driver.switch_to.default_content()
+        except:
+            pass
+
+        return {
+            "downloaded": downloaded,
+            "exported": exp,
+            "gsheet_url": url,
+            "sheet": "OUT1"
+        }
+
+    except Exception as e:
+
+        print(
+            "\n  ❌ CELL 7 ERROR:"
+        )
+
+        print(
+            f"      {e}"
+        )
+
+        print(
+            traceback.format_exc()
+        )
+
+        try:
+            driver.switch_to.default_content()
+        except:
+            pass
+
+        return None
+```
 
 # =============================================================================
 # CELL 5 — iDempiere ERP → tab "IP_iDempiere"
