@@ -1227,131 +1227,57 @@ def trigger_jasper_apply_robust(driver):
 # -----------------------------------------------------------------------------
 # 3. Export XLSX Robust (Retries & Delay ditingkatkan)
 # -----------------------------------------------------------------------------
-def force_export_xlsx(driver, retries=10, delay=10):
+def force_export_xlsx(driver, retries=5, delay=10):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
-    download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
-    initial_files = set()
-    for d in download_dirs:
-        if d and os.path.exists(d):
-            initial_files.update([os.path.join(d, f) for f in os.listdir(d) if f.endswith('.xlsx')])
-
     for attempt in range(1, retries + 1):
         driver.switch_to.default_content()
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        contexts = [None] + iframes
         
-        button_clicked = False
+        # Bersihkan overlay penghalang
+        driver.execute_script("""
+            var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+            overlays.forEach(function(el) { el.remove(); });
+        """)
+        time.sleep(1)
         
-        # Tahap A: Cari dan klik tombol utama Export
-        for ctx in contexts:
-            driver.switch_to.default_content()
-            if ctx is not None:
-                try: 
-                    driver.switch_to.frame(ctx)
-                except: 
-                    continue
+        # Coba trigger export via JS
+        exported = driver.execute_script("""
+            var exportBtn = document.querySelector('#exporter .button') || 
+                            document.querySelector('#export .button') ||
+                            document.querySelector('[title*="Export"]') ||
+                            document.querySelector('.jr-mButtonExport') ||
+                            document.querySelector('#exportElement');
+                            
+            if (exportBtn && !exportBtn.disabled) {
+                exportBtn.click();
+                if (window.jQuery) $(exportBtn).trigger('click');
+            }
             
-            button_clicked = driver.execute_script("""
-                function triggerClick(el) {
-                    if (!el) return false;
-                    try {
-                        el.scrollIntoView({block: 'center'});
-                        el.removeAttribute('disabled');
-                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                        });
-                        if (window.jQuery) { $(el).trigger('click'); }
-                        return true;
-                    } catch(e) { return false; }
-                }
-
-                var selectors = [
-                    '#exporter', '#exporter button', '#exporter .button', '#exporter a',
-                    '#exportElement', '#export', '#export button', '#export a',
-                    '.jr-mButtonExport', '.j-button-export', '[title*="Export"]', '[title*="export"]',
-                    '[aria-label*="Export"]', '[aria-label*="export"]', 'button.export', 'div.export button',
-                    'button[name="export"]', '.exportIcon', '.jr-mControlExport', '#reportViewerExport'
-                ];
-                for (var s of selectors) {
-                    var el = document.querySelector(s);
-                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
-                        if (triggerClick(el)) return true;
-                    }
-                }
-
-                var candidates = Array.from(document.querySelectorAll('button, a, div, span, input, i'));
-                var match = candidates.find(el => {
-                    var txt = (el.innerText || el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                    return (txt === 'export' || txt.startsWith('export') || txt.includes('export options') || txt === 'ekspor');
-                });
-                if (match) {
-                    return triggerClick(match);
-                }
-                return false;
-            """)
+            var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
+                          document.querySelector('a[href*="xlsx"]') || 
+                          Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
+                          
+            if (xlsxOpt) {
+                xlsxOpt.click();
+                return true;
+            }
+            return false;
+        """)
+        
+        if exported:
+            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
+            time.sleep(5)
+            return True
             
-            if button_clicked:
-                time.sleep(2.5)
-                break
-                
-        # Tahap B: Cari dan klik opsi XLSX
-        option_clicked = False
-        for ctx in contexts:
-            driver.switch_to.default_content()
-            if ctx is not None:
-                try: 
-                    driver.switch_to.frame(ctx)
-                except: 
-                    continue
-            
-            option_clicked = driver.execute_script("""
-                function triggerClick(el) {
-                    if (!el) return false;
-                    try {
-                        el.scrollIntoView({block: 'center'});
-                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                        });
-                        if (window.jQuery) { $(el).trigger('click'); }
-                        return true;
-                    } catch(e) { return false; }
-                }
+        # Fallback ke fungsi global jika ada
+        if 'export_xlsx' in globals():
+            res = export_xlsx(driver)
+            if res: return res
 
-                var xlsxSelectors = [
-                    'li[data-format="xlsx"]', 'a[data-format="xlsx"]', '[data-outputformat="xlsx"]',
-                    '[data-value="xlsx"]', 'a[href*="xlsx"]', 'li.xlsx', 'a.xlsx', '[data-client-option="xlsx"]'
-                ];
-                for (var s of xlsxSelectors) {
-                    var el = document.querySelector(s);
-                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
-                        if (triggerClick(el)) return true;
-                    }
-                }
-
-                var allElems = Array.from(document.querySelectorAll('li, a, option, span, div, button, td'));
-                var match = allElems.find(el => {
-                    var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                    return txt === 'EXCEL (XLSX)' || txt === 'XLSX' || txt.includes('EXCEL (XLSX)') || txt === 'EXCEL' || txt.includes('XLSX');
-                });
-                if (match) {
-                    return triggerClick(match);
-                }
-                return false;
-            """)
-            
-            if option_clicked:
-                print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
-                filepath = get_latest_download_file(initial_files=initial_files, timeout=90)
-                if filepath:
-                    return filepath
-                break
-
-        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export / File belum siap, menunggu {delay}s...")
+        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
         time.sleep(delay)
         
-    driver.switch_to.default_content()
-    return None
+    return False
 
 # -----------------------------------------------------------------------------
 # 4. Main Function — CELL 6
@@ -1577,131 +1503,57 @@ def trigger_jasper_apply_robust(driver):
 # -----------------------------------------------------------------------------
 # 3. Export XLSX Robust (Retries & Delay ditingkatkan)
 # -----------------------------------------------------------------------------
-def force_export_xlsx(driver, retries=10, delay=10):
+def force_export_xlsx(driver, retries=5, delay=10):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
-    download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
-    initial_files = set()
-    for d in download_dirs:
-        if d and os.path.exists(d):
-            initial_files.update([os.path.join(d, f) for f in os.listdir(d) if f.endswith('.xlsx')])
-
     for attempt in range(1, retries + 1):
         driver.switch_to.default_content()
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        contexts = [None] + iframes
         
-        button_clicked = False
+        # Bersihkan overlay penghalang
+        driver.execute_script("""
+            var overlays = document.querySelectorAll('.glassPane, .spinner, .loading-overlay, [class*="overlay"]');
+            overlays.forEach(function(el) { el.remove(); });
+        """)
+        time.sleep(1)
         
-        # Tahap A: Cari dan klik tombol utama Export
-        for ctx in contexts:
-            driver.switch_to.default_content()
-            if ctx is not None:
-                try: 
-                    driver.switch_to.frame(ctx)
-                except: 
-                    continue
+        # Coba trigger export via JS
+        exported = driver.execute_script("""
+            var exportBtn = document.querySelector('#exporter .button') || 
+                            document.querySelector('#export .button') ||
+                            document.querySelector('[title*="Export"]') ||
+                            document.querySelector('.jr-mButtonExport') ||
+                            document.querySelector('#exportElement');
+                            
+            if (exportBtn && !exportBtn.disabled) {
+                exportBtn.click();
+                if (window.jQuery) $(exportBtn).trigger('click');
+            }
             
-            button_clicked = driver.execute_script("""
-                function triggerClick(el) {
-                    if (!el) return false;
-                    try {
-                        el.scrollIntoView({block: 'center'});
-                        el.removeAttribute('disabled');
-                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                        });
-                        if (window.jQuery) { $(el).trigger('click'); }
-                        return true;
-                    } catch(e) { return false; }
-                }
-
-                var selectors = [
-                    '#exporter', '#exporter button', '#exporter .button', '#exporter a',
-                    '#exportElement', '#export', '#export button', '#export a',
-                    '.jr-mButtonExport', '.j-button-export', '[title*="Export"]', '[title*="export"]',
-                    '[aria-label*="Export"]', '[aria-label*="export"]', 'button.export', 'div.export button',
-                    'button[name="export"]', '.exportIcon', '.jr-mControlExport', '#reportViewerExport'
-                ];
-                for (var s of selectors) {
-                    var el = document.querySelector(s);
-                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
-                        if (triggerClick(el)) return true;
-                    }
-                }
-
-                var candidates = Array.from(document.querySelectorAll('button, a, div, span, input, i'));
-                var match = candidates.find(el => {
-                    var txt = (el.innerText || el.textContent || el.getAttribute('title') || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                    return (txt === 'export' || txt.startsWith('export') || txt.includes('export options') || txt === 'ekspor');
-                });
-                if (match) {
-                    return triggerClick(match);
-                }
-                return false;
-            """)
+            var xlsxOpt = document.querySelector('li[data-format="xlsx"]') || 
+                          document.querySelector('a[href*="xlsx"]') || 
+                          Array.from(document.querySelectorAll('li, a, option')).find(el => (el.innerText || '').includes('Excel (XLSX)') || (el.innerText || '').includes('XLSX'));
+                          
+            if (xlsxOpt) {
+                xlsxOpt.click();
+                return true;
+            }
+            return false;
+        """)
+        
+        if exported:
+            print(f"  ✅ Trigger export berhasil pada percobaan ke-{attempt}")
+            time.sleep(5)
+            return True
             
-            if button_clicked:
-                time.sleep(2.5)
-                break
-                
-        # Tahap B: Cari dan klik opsi XLSX
-        option_clicked = False
-        for ctx in contexts:
-            driver.switch_to.default_content()
-            if ctx is not None:
-                try: 
-                    driver.switch_to.frame(ctx)
-                except: 
-                    continue
-            
-            option_clicked = driver.execute_script("""
-                function triggerClick(el) {
-                    if (!el) return false;
-                    try {
-                        el.scrollIntoView({block: 'center'});
-                        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                            el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                        });
-                        if (window.jQuery) { $(el).trigger('click'); }
-                        return true;
-                    } catch(e) { return false; }
-                }
+        # Fallback ke fungsi global jika ada
+        if 'export_xlsx' in globals():
+            res = export_xlsx(driver)
+            if res: return res
 
-                var xlsxSelectors = [
-                    'li[data-format="xlsx"]', 'a[data-format="xlsx"]', '[data-outputformat="xlsx"]',
-                    '[data-value="xlsx"]', 'a[href*="xlsx"]', 'li.xlsx', 'a.xlsx', '[data-client-option="xlsx"]'
-                ];
-                for (var s of xlsxSelectors) {
-                    var el = document.querySelector(s);
-                    if (el && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
-                        if (triggerClick(el)) return true;
-                    }
-                }
-
-                var allElems = Array.from(document.querySelectorAll('li, a, option, span, div, button, td'));
-                var match = allElems.find(el => {
-                    var txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                    return txt === 'EXCEL (XLSX)' || txt === 'XLSX' || txt.includes('EXCEL (XLSX)') || txt === 'EXCEL' || txt.includes('XLSX');
-                });
-                if (match) {
-                    return triggerClick(match);
-                }
-                return false;
-            """)
-            
-            if option_clicked:
-                print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
-                filepath = get_latest_download_file(initial_files=initial_files, timeout=90)
-                if filepath:
-                    return filepath
-                break
-
-        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export / File belum siap, menunggu {delay}s...")
+        print(f"  ⏳ [Percobaan {attempt}/{retries}] Tombol Export belum siap, menunggu {delay}s...")
         time.sleep(delay)
         
-    driver.switch_to.default_content()
-    return None
+    return False
 
 # -----------------------------------------------------------------------------
 # 4. Main Function — CELL 7
