@@ -1061,7 +1061,7 @@ def run_cell4(driver, gc):
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 
 # =============================================================================
-# CELL 6 — Outstanding → tab "OUT"
+# CELL 6 — Outstanding → tab "OUT" (Waktu Tunggu Ditingkatkan)
 # =============================================================================
 BOT76IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
@@ -1077,9 +1077,9 @@ import traceback
 from selenium.webdriver.common.by import By
 
 # -----------------------------------------------------------------------------
-# Helper Pencari File XLSX Baru Terdownload
+# Helper Pencari File XLSX Baru Terdownload (Timeout ditingkatkan ke 90 detik)
 # -----------------------------------------------------------------------------
-def get_latest_download_file(initial_files=None, timeout=35):
+def get_latest_download_file(initial_files=None, timeout=90):
     if initial_files is None:
         initial_files = set()
         
@@ -1103,7 +1103,7 @@ def get_latest_download_file(initial_files=None, timeout=35):
                 for f in files:
                     if f not in initial_files and (time.time() - os.path.getmtime(f) < 300):
                         return f
-        time.sleep(1.5)
+        time.sleep(2)
     return None
 
 # -----------------------------------------------------------------------------
@@ -1144,7 +1144,7 @@ def fill_date_out_today(driver, label, index=0):
             return true;
         """, index)
         
-        time.sleep(0.5)
+        time.sleep(1)
         
         driver.execute_script("""
             var todayBtn = document.querySelector('.ui-datepicker-current') || 
@@ -1158,7 +1158,7 @@ def fill_date_out_today(driver, label, index=0):
             }
         """)
         
-        time.sleep(0.5)
+        time.sleep(1)
         print(f"  ✅  Berhasil memilih tanggal hari ini untuk {label}.")
         return True
         
@@ -1225,12 +1225,11 @@ def trigger_jasper_apply_robust(driver):
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
 # -----------------------------------------------------------------------------
-# 3. Export XLSX Robust (Multi-Context & Event Injection)
+# 3. Export XLSX Robust (Retries & Delay ditingkatkan)
 # -----------------------------------------------------------------------------
-def force_export_xlsx(driver, retries=6, delay=5):
+def force_export_xlsx(driver, retries=10, delay=10):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
-    # Snapshot file sebelum ekspor untuk perbandingan
     download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
     initial_files = set()
     for d in download_dirs:
@@ -1293,7 +1292,7 @@ def force_export_xlsx(driver, retries=6, delay=5):
             """)
             
             if button_clicked:
-                time.sleep(1.5)
+                time.sleep(2.5)
                 break
                 
         # Tahap B: Cari dan klik opsi XLSX
@@ -1343,7 +1342,7 @@ def force_export_xlsx(driver, retries=6, delay=5):
             
             if option_clicked:
                 print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
-                filepath = get_latest_download_file(initial_files=initial_files, timeout=35)
+                filepath = get_latest_download_file(initial_files=initial_files, timeout=90)
                 if filepath:
                     return filepath
                 break
@@ -1363,7 +1362,7 @@ def run_cell6(driver, gc):
     print("="*60)
     try:
         driver.get(BOT76IP_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        print("  ⏳  45s tunggu load ..."); time.sleep(45)
         
         try: wait_ready(driver)
         except NameError: pass
@@ -1373,40 +1372,38 @@ def run_cell6(driver, gc):
         # Langkah 1: Klik Tanggal Akhir Hari Ini
         fill_date_out_today(driver, "Tanggal Akhir", 0)
         
-        time.sleep(2)
+        time.sleep(3)
         
         # Langkah 2: Klik Apply
         trigger_jasper_apply_robust(driver)
         
         # Tunggu proses report Jasper selesai
         try: 
-            wait_loading(driver, timeout=900)
+            wait_loading(driver, timeout=1200)
         except TypeError:
             wait_loading(driver)
         except NameError: 
-            time.sleep(30)
+            print("  ⏳ Tunggu rendering laporan 60 detik ...")
+            time.sleep(60)
         
-        time.sleep(5)
+        time.sleep(10)
         
-        # Langkah 3: Export & Upload
-        downloaded = force_export_xlsx(driver, retries=6, delay=5)
+        # Langkah 3: Export & Upload (Retries=10, Delay=10s)
+        downloaded = force_export_xlsx(driver, retries=10, delay=10)
         if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding")
             url = save_to_gsheet(gc, downloaded, "OUT", "Data OUT")
             
-            # =========================================================
-            # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
-            # =========================================================
+            # Update waktu tarikan ke GSheet
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
-                worksheet = sh.worksheet("OUT") 
+                worksheet = sh.worksheet("OUT")
                 
                 worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
             except Exception as e:
                 print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            # =========================================================
             
             bot_footer(exp, url, "OUT")
         else:
@@ -1414,7 +1411,7 @@ def run_cell6(driver, gc):
     except Exception as e: 
         print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
-# CELL 7 — Outstanding Detail → tab "OUT1"
+# CELL 7 — Outstanding Detail → tab "OUT1" (Waktu Tunggu Ditingkatkan)
 # =============================================================================
 BOT78IP_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
@@ -1430,9 +1427,9 @@ import traceback
 from selenium.webdriver.common.by import By
 
 # -----------------------------------------------------------------------------
-# Helper Pencari File XLSX Baru Terdownload
+# Helper Pencari File XLSX Baru Terdownload (Timeout ditingkatkan ke 90 detik)
 # -----------------------------------------------------------------------------
-def get_latest_download_file(initial_files=None, timeout=35):
+def get_latest_download_file(initial_files=None, timeout=90):
     if initial_files is None:
         initial_files = set()
         
@@ -1456,7 +1453,7 @@ def get_latest_download_file(initial_files=None, timeout=35):
                 for f in files:
                     if f not in initial_files and (time.time() - os.path.getmtime(f) < 300):
                         return f
-        time.sleep(1.5)
+        time.sleep(2)
     return None
 
 # -----------------------------------------------------------------------------
@@ -1497,7 +1494,7 @@ def fill_date_out_today(driver, label, index=0):
             return true;
         """, index)
         
-        time.sleep(0.5)
+        time.sleep(1)
         
         driver.execute_script("""
             var todayBtn = document.querySelector('.ui-datepicker-current') || 
@@ -1511,7 +1508,7 @@ def fill_date_out_today(driver, label, index=0):
             }
         """)
         
-        time.sleep(0.5)
+        time.sleep(1)
         print(f"  ✅  Berhasil memilih tanggal hari ini untuk {label}.")
         return True
         
@@ -1578,12 +1575,11 @@ def trigger_jasper_apply_robust(driver):
             print(f"  ⚠️ Fallback Apply Error: {e}")
 
 # -----------------------------------------------------------------------------
-# 3. Export XLSX Robust (Multi-Context & Event Injection)
+# 3. Export XLSX Robust (Retries & Delay ditingkatkan)
 # -----------------------------------------------------------------------------
-def force_export_xlsx(driver, retries=6, delay=5):
+def force_export_xlsx(driver, retries=10, delay=10):
     print("  📤 Membuka Export Dropdown & Download XLSX ...")
     
-    # Snapshot file sebelum ekspor untuk perbandingan
     download_dirs = [globals().get('DOWNLOAD_DIR'), os.path.expanduser("~/Downloads"), os.getcwd(), "/tmp"]
     initial_files = set()
     for d in download_dirs:
@@ -1646,7 +1642,7 @@ def force_export_xlsx(driver, retries=6, delay=5):
             """)
             
             if button_clicked:
-                time.sleep(1.5)
+                time.sleep(2.5)
                 break
                 
         # Tahap B: Cari dan klik opsi XLSX
@@ -1696,7 +1692,7 @@ def force_export_xlsx(driver, retries=6, delay=5):
             
             if option_clicked:
                 print(f"  ✅ Trigger export via UI berhasil (Percobaan ke-{attempt})")
-                filepath = get_latest_download_file(initial_files=initial_files, timeout=35)
+                filepath = get_latest_download_file(initial_files=initial_files, timeout=90)
                 if filepath:
                     return filepath
                 break
@@ -1716,7 +1712,7 @@ def run_cell7(driver, gc):
     print("="*60)
     try:
         driver.get(BOT78IP_REPORT_URL)
-        print("  ⏳  25s tunggu load ..."); time.sleep(25)
+        print("  ⏳  45s tunggu load ..."); time.sleep(45)
         
         try: wait_ready(driver)
         except NameError: pass
@@ -1726,30 +1722,29 @@ def run_cell7(driver, gc):
         # Langkah 1: Klik Tanggal Akhir Hari Ini
         fill_date_out_today(driver, "Tanggal Akhir", 0)
         
-        time.sleep(2)
+        time.sleep(3)
         
         # Langkah 2: Klik Apply
         trigger_jasper_apply_robust(driver)
         
         # Tunggu proses report Jasper selesai
         try: 
-            wait_loading(driver, timeout=900)
+            wait_loading(driver, timeout=1200)
         except TypeError:
             wait_loading(driver)
         except NameError: 
-            time.sleep(30)
+            print("  ⏳ Tunggu rendering laporan 60 detik ...")
+            time.sleep(60)
         
-        time.sleep(5)
+        time.sleep(10)
         
-        # Langkah 3: Export & Upload
-        downloaded = force_export_xlsx(driver, retries=6, delay=5)
+        # Langkah 3: Export & Upload (Retries=10, Delay=10s)
+        downloaded = force_export_xlsx(driver, retries=10, delay=10)
         if downloaded and isinstance(downloaded, str):
             exp = save_to_export(downloaded, "Monitor_Status_Dokumen_Outstanding_Detail")
             url = save_to_gsheet(gc, downloaded, "OUT1", "Data OUT Detail")
             
-            # =========================================================
-            # UPDATE WAKTU TARIKAN KE GOOGLE SHEET
-            # =========================================================
+            # Update waktu tarikan ke GSheet
             try:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
@@ -1759,7 +1754,6 @@ def run_cell7(driver, gc):
                 print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
             except Exception as e:
                 print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
-            # =========================================================
             
             bot_footer(exp, url, "OUT1")
         else:
