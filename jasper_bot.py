@@ -986,7 +986,7 @@ def run_cell6(driver, gc):
         fill_date_dialog(driver, "Date Start", 0, DATE_START); time.sleep(0.8)
         fill_date_dialog(driver, "Date End", 1, DATE_END); time.sleep(0.8)
         select_dropdown_by_label(driver, "Branch From", "01"); time.sleep(0.8)
-        select_dropdown_by_label(driver, "Document Type", "Inventory Move (Pengepokan)"); time.sleep(0.8)
+        select_dropdown_by_label(driver, "Document Type", "Inventory Move"); time.sleep(0.8)
         select_dropdown_by_label(driver, "DocStatus", "In Progress"); time.sleep(0.8)
         
         click_apply_dialog(driver)
