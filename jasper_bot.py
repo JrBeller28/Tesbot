@@ -908,130 +908,105 @@ def run_cell4(driver, gc):
         else: print("\n  ⚠️  Download gagal")
     except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
-# CELL 6 — Outstanding → tab "OUT"
+# CELL 6 — Outstanding → tab "IM_IP"
 # =============================================================================
 
-BOT76IP_REPORT_URL = (
+BOT76IM_REPORT_URL = (
     f"{BASE_URL}/flow.html?_flowId=viewReportFlow&_flowId=viewReportFlow"
-    "&ParentFolderUri=%2FiDempiere%2FInventory%2FMonitor_Trx"
-    "&reportUnit=%2FiDempiere%2FInventory%2FMonitor_Trx%2FMonitor_Status_Dokumen_Outstanding_2_1"
+    "&ParentFolderUri=%2FiDempiere%2FLogistik%2FMonitorTrx%2FInventory_Move"
+    "&reportUnit=%2FiDempiere%2FLogistik%2FMonitorTrx%2FInventory_Move%2FMonitor_Status_Inventory_Move_In_Progress__Real_Time_"
     "&standAlone=true"
 )
+DATE_START = "2025-01-01"
+DATE_END   = datetime.today().strftime("%Y-%m-%d")
 
+def fill_date_dialog(driver, label, index, date_value):
+    print(f"  📅  {label} → '{date_value}'")
+    driver.switch_to.default_content()
+    try: driver.execute_script("var dp=document.querySelector('.ui-datepicker');if(dp)dp.style.display='none';")
+    except: pass
+    time.sleep(0.3)
+    inp = None
+    inps = driver.find_elements(By.CSS_SELECTOR, "input.date.hasDatepicker")
+    if index < len(inps): inp = inps[index]
+    if not inp:
+        try:
+            all_inps = driver.find_elements(By.CSS_SELECTOR,
+                ".jr-mDialog input[type='text'], [class*='dialog'] input[type='text']")
+            if index < len(all_inps): inp = all_inps[index]
+        except: pass
+    if not inp: print(f"  ❌  Input index {index} tidak ditemukan!"); return False
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp); time.sleep(0.4)
+    try:
+        ActionChains(driver).move_to_element(inp).click().perform(); time.sleep(0.3)
+        inp.send_keys(Keys.CONTROL+"a"); time.sleep(0.1)
+        inp.send_keys(Keys.DELETE);     time.sleep(0.1)
+        inp.send_keys(date_value);       time.sleep(0.3)
+        inp.send_keys(Keys.TAB);        time.sleep(0.5)
+        val = inp.get_attribute('value')
+        if val and val.strip(): trigger_events(driver, inp); print(f"  ✅  '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S1: {e}")
+    try:
+        driver.execute_script("""
+            var el=arguments[0],v=arguments[1];
+            var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
+            s.call(el,v); el.value=v;
+            ['focus','input','change','blur'].forEach(function(e){
+                el.dispatchEvent(new Event(e,{bubbles:true}));});
+            el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'Tab',keyCode:9}));
+        """, inp, date_value); time.sleep(0.5)
+        val = inp.get_attribute('value')
+        if val and val.strip(): print(f"  ✅  JS '{val}'"); return True
+    except Exception as e: print(f"  ⚠️  S2: {e}")
+    print(f"  ❌  {label} GAGAL!"); return False
+
+def select_dropdown_by_label(driver, label_text, target_text):
+    print(f"  🔽  {label_text} → '{target_text}'")
+    try:
+        label = driver.find_element(By.XPATH, f"//*[contains(text(),'{label_text}')]")
+        toggle = label.find_element(By.XPATH, "following::a[contains(@class,'jr-mSingleselect-input')][1]")
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
+        time.sleep(0.5); toggle.click(); time.sleep(1)
+        option = driver.find_element(By.XPATH, f"//*[text()='{target_text}']")
+        option.click(); time.sleep(1)
+        print(f"  ✅  Terpilih: {target_text}")
+        return True
+    except Exception as e:
+        print(f"  ❌  {e}"); return False
 
 def run_cell6(driver, gc):
     print("\n" + "="*60)
-    print("  🤖  CELL 6 — Outstanding")
+    print("  🤖  BOT — Inventory Move : In Progress")
     print("="*60)
-
     try:
-        # ---------------------------------------------------------------------
-        # Buka report
-        # ---------------------------------------------------------------------
-        driver.get(BOT76IP_REPORT_URL)
-
-        print("  ⏳  45s tunggu load ...")
-        time.sleep(45)
-
+        driver.get(BOT76IM_REPORT_URL)
+        print("  ⏳  25s tunggu load ..."); time.sleep(25)
         wait_ready(driver)
-
-        # ---------------------------------------------------------------------
-        # Input Controls
-        # ---------------------------------------------------------------------
         print("\n  📋  Input Controls ...")
-
-        # Tanggal Akhir = Hari Ini
-        # Mengikuti pola Cell 3
-        today_str = datetime.today().strftime("%Y-%m-%d")
-
-        fill_date_dialog(
-            driver,
-            "Tanggal Akhir",
-            0,
-            today_str
-        )
-
-        time.sleep(1)
-
-        # ---------------------------------------------------------------------
-        # Apply
-        # ---------------------------------------------------------------------
+        fill_date_dialog(driver, "Date Start", 0, DATE_START); time.sleep(0.8)
+        fill_date_dialog(driver, "Date End", 1, DATE_END); time.sleep(0.8)
+        select_dropdown_by_label(driver, "Branch From", "01"); time.sleep(0.8)
+        select_dropdown_by_label(driver, "Document Type", "Inventory Move (Pengepokan)"); time.sleep(0.8)
+        select_dropdown_by_label(driver, "DocStatus", "In Progress"); time.sleep(0.8)
+        
         click_apply_dialog(driver)
-
-        # ---------------------------------------------------------------------
-        # Tunggu report selesai
-        # ---------------------------------------------------------------------
         wait_loading(driver)
-
         time.sleep(3)
-
-        # ---------------------------------------------------------------------
-        # Export XLSX
-        # ---------------------------------------------------------------------
         downloaded = export_xlsx(driver)
 
-        # ---------------------------------------------------------------------
-        # Simpan ke export + Google Sheet
-        # ---------------------------------------------------------------------
         if downloaded:
-
-            exp = save_to_export(
-                downloaded,
-                "MonitorStatusDokumen_OUT"
-            )
-
-            url = save_to_gsheet(
-                gc,
-                downloaded,
-                "OUT",
-                "Data OUT"
-            )
-
+            exp = save_to_export(downloaded, "InventoryMove_InProgress")
+            url = save_to_gsheet(gc, downloaded, "IM", "Inventory Move In Progress")
             try:
-                now_str = datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 sh = gc.open_by_url(url)
-
-                worksheet = sh.worksheet("OUT")
-
-                worksheet.update_acell(
-                    "C3",
-                    f"Terakhir Ditarik: {now_str}"
-                )
-
-                print(
-                    f"  🕒  Waktu tarikan dicatat "
-                    f"di GSheet sel C3 "
-                    f"({now_str})."
-                )
-
-            except Exception as e:
-
-                print(
-                    f"  ⚠️  Gagal update waktu "
-                    f"di GSheet: {e}"
-                )
-
-            bot_footer(
-                exp,
-                url,
-                "OUT"
-            )
-
-        else:
-
-            print(
-                "\n  ⚠️  Download gagal"
-            )
-
-    except Exception as e:
-
-        print(
-            f"\n  ❌  {e}\n"
-            f"{traceback.format_exc()}"
-        )
+                worksheet = sh.worksheet("IM_IP")
+                worksheet.update_acell('C3', f"Terakhir Ditarik: {now_str}")
+                print(f"  🕒  Waktu tarikan dicatat di GSheet sel C3 ({now_str}).")
+            except Exception as e: print(f"  ⚠️  Gagal update cell waktu di GSheet: {e}")
+            bot_footer(exp, url, "IM_IP")
+        else: print("\n  ⚠️  Download gagal")
+    except Exception as e: print(f"\n  ❌  {e}\n{traceback.format_exc()}")
 # =============================================================================
 # CELL 7 — Outstanding Detail → tab "OUT1"
 # =============================================================================
